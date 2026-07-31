@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.jpg
+*.jpeg
+*.png
+*.log
+*.json
+*.bak
+*.bak2
+a4_corners.json
+config.json
+taught_layout.json
+saved_frame.jpg
+/tmp/
