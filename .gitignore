@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+freeze.json
+a4_corners.json
+saved_frame.jpg
+*.log
