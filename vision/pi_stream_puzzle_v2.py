@@ -1836,12 +1836,6 @@ body{background:#111;color:#fff;font:14px/1.5 monospace}
 
 .ctrl .sep{width:2px;background:#444;margin:0 4px}
 
-.btn-c{background:#F44336;border-color:#E57373}
-
-.btn-p{background:#2196F3;border-color:#64B5F6}
-
-.btn-m{background:#FF5722;border-color:#FF8A65}
-
 .btn-num{background:#607D8B;border-color:#90A4AE}
 
 .btn-t{background:#009688;border-color:#4DB6AC}
@@ -1875,16 +1869,6 @@ body{background:#111;color:#fff;font:14px/1.5 monospace}
 <div class=mode-bar id=mode_bar>Mode: AUTO</div>
 
 <div class=ctrl>
-
-<button class=btn-c onclick="window.open('/calibrate','_blank')">C</button>
-
-<button class=btn-p onclick=act('P')>P</button>
-
-<button class=btn-m onclick=act('M')>M</button>
-
-<span class=sep></span>
-
-<button class=btn-num onclick=act('0')>0</button>
 
 <button class=btn-num onclick=act('1')>1</button>
 
@@ -2893,74 +2877,7 @@ def main():
 
             key = cv2.waitKey(1) & 0xFF
 
-            if key == ord('c'):
-
-                # Keyboard calibration: click 4 corners on the imshow window
-
-                calib_pts = []
-
-                def on_click(event, x, y, flags, param):
-
-                    if event == cv2.EVENT_LBUTTONDOWN and len(calib_pts) < 4:
-
-                        calib_pts.append([x, y])
-
-                        log_print(f"Corner {len(calib_pts)}: ({x}, {y})")
-
-                cv2.setMouseCallback("Camera", on_click)
-
-                log_print("C: click 4 A4 corners on the window, then press any key")
-
-                while len(calib_pts) < 4:
-
-                    cv2.imshow("Camera", display)
-
-                    if cv2.waitKey(100) & 0xFF in (27, ord('q')):
-
-                        break
-
-                cv2.setMouseCallback("Camera", lambda *args: None)
-
-                if len(calib_pts) == 4:
-
-                    pts_sorted = order_points(np.array(calib_pts, dtype=np.float32)).tolist()
-
-                    with open(str(CALIBRATION_FILE), 'w') as f:
-
-                        json.dump({"corners": pts_sorted}, f, indent=2)
-
-                    corners = np.asarray(pts_sorted, dtype=np.float32)
-
-                    c2w, w2c = build_matrices(corners)
-
-                    use_auto_detect = False
-
-                    # Sync calibration to SharedState for web crosshair (arm-mm)
-                    with SharedState.lock:
-                        SharedState.calib_data = {
-                            "has_calib": True,
-                            "corners": corners.tolist(),
-                            "c2w": c2w.tolist(),
-                            "ppm": round(PIXELS_PER_MM, 4),
-                            "origin_wx": WARP_WIDTH - 1,
-                            "origin_wy": 300.0,
-                        }
-
-                    log_print("C: calibration saved")
-
-            elif key == ord('p'):
-
-                SharedState.action_queue.put("P")
-
-            elif key == ord('m'):
-
-                SharedState.action_queue.put("M")
-
-            elif key == ord('0'):
-
-                SharedState.action_queue.put("0")
-
-            elif key == ord('1'):
+            if key == ord('1'):
 
                 SharedState.action_queue.put("1")
 
