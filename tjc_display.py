@@ -202,7 +202,9 @@ def draw_state(tjc,
                arm_status="",
                pi_status="",
                task_status="",
-               project_loaded=True):
+               project_loaded=True,
+               a4_rotation_deg=0.0,
+               cam_frame_arm=None):
     """Draw puzzle state on TJC screen.
 
     project_loaded=True (HMI project on screen):
@@ -211,6 +213,9 @@ def draw_state(tjc,
 
     project_loaded=False (bare screen):
       Falls back to drawing status bar + visual buttons manually.
+
+    a4_rotation_deg: A4 rotation in degrees (positive = clockwise in arm space).
+    cam_frame_arm: optional list of [x,y] arm-mm points for camera FOV (blue rect).
     """
     pieces_arm = pieces_arm or []
     plan_items = plan_items or []
@@ -228,15 +233,43 @@ def draw_state(tjc,
     # 2. Draw A4 + pieces
     tjc.begin_batch()
 
-    # FIX: Only clear A4 paper area to prevent ghost trails without
-    # covering HMI firmware buttons. Buttons live below the A4 zone.
+    # ============================================================
+    # Step 1: COMPUTE all screen coordinates first
+    # ============================================================
+    a4_raw = [[210.0, -75.0], [0.0, -75.0], [0.0, 222.0], [210.0, 222.0]]
+    if abs(a4_rotation_deg) > 0.05:
+        cx, cy = 105.0, 73.5
+        rad = math.radians(a4_rotation_deg)
+        cos_r, sin_r = math.cos(rad), math.sin(rad)
+        a4_rot = []
+        for ax, ay in a4_raw:
+            rx = cx + (ax - cx) * cos_r - (ay - cy) * sin_r
+            ry = cy + (ax - cx) * sin_r + (ay - cy) * cos_r
+            a4_rot.append([rx, ry])
+        a4 = [arm_to_screen(ax, ay) for ax, ay in a4_rot]
+    else:
+        a4 = [arm_to_screen(ax, ay) for ax, ay in a4_raw]
+
+    cam_pts = None
+    if cam_frame_arm and len(cam_frame_arm) >= 4:
+        cam_pts = [arm_to_screen(ax, ay) for ax, ay in cam_frame_arm[:4]]
+
+    # ============================================================
+    # Step 2: FILL — clear only the content bounding box
+    # ============================================================
     if project_loaded:
-        pad = 15  # px margin around A4 for pieces near the edge
-        tjc.fill(max(0, int(A4_OX) - pad),
-                 max(0, int(A4_OY) - pad),
-                 min(SW, int(A4_PX_W) + pad * 2),
-                 min(SH, int(A4_PX_H) + pad * 2),
-                 W)
+        all_pts = list(a4)
+        if cam_pts:
+            all_pts = all_pts + cam_pts
+        xs = [p[0] for p in all_pts]
+        ys = [p[1] for p in all_pts]
+        pad = 12
+        fx0 = max(0, int(min(xs)) - pad)
+        fy0 = max(UI_TOP, int(min(ys)) - pad)
+        fx1 = min(SW, int(max(xs)) + pad)
+        fy1 = min(BTN_ROW1_Y - 4, int(max(ys)) + pad)
+        if fx1 > fx0 and fy1 > fy0:
+            tjc.fill(fx0, fy0, fx1 - fx0, fy1 - fy0, W)
 
     if not project_loaded:
         hdr_bg = 1057
@@ -260,10 +293,15 @@ def draw_state(tjc,
             tjc.fill(bx, BTN_ROW1_Y, bw - 4, BTN_ROW_H, 25585)
             tjc.xstr(bx + 4, BTN_ROW1_Y + 2, label, W, 25585, bw - 8, BTN_ROW_H - 2)
 
-    # A4 outline
-    a4 = [arm_to_screen(210, -75), arm_to_screen(0, -75),
-          arm_to_screen(0, 222), arm_to_screen(210, 222)]
+    # ============================================================
+    # Step 3: DRAW
+    # ============================================================
+    # A4 outline (grey)
     tjc.polyline(a4, GY)
+
+    # Camera frame (blue, axis-aligned)
+    if cam_pts:
+        tjc.polyline(cam_pts, BL)
 
     # Origin
     o = arm_to_screen(0, 0)

@@ -2356,8 +2356,56 @@ class TS(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 # ============================================================
 
-def _build_tjc_state(pieces, reconst, fps=0, last_action="", selected_mode="AUTO"):
-    """Convert vision data to arm-mm format for TJC display."""
+def _build_tjc_state(pieces, reconst, fps=0, last_action="", selected_mode="AUTO",
+                     a4_corners_camera=None, cam_w=1920, cam_h=1080):
+    """Convert vision data to arm-mm format for TJC display.
+
+    a4_corners_camera: optional [4x2] A4 corners in camera image coords.
+    cam_w, cam_h: camera image dimensions.
+    """
+    # Compute A4 rotation + camera view frame
+    a4_rot = 0.0
+    cam_frame_arm = None
+    if a4_corners_camera is not None and len(a4_corners_camera) == 4:
+        tl = np.array(a4_corners_camera[0], dtype=np.float64)
+        tr = np.array(a4_corners_camera[1], dtype=np.float64)
+        bl = np.array(a4_corners_camera[3], dtype=np.float64)
+        br = np.array(a4_corners_camera[2], dtype=np.float64)
+
+        # Rotation from top edge
+        cam_deg = math.degrees(math.atan2(tr[1] - tl[1], tr[0] - tl[0]))
+        a4_rot = -cam_deg
+
+        # Camera frame: find A4 position in camera image, extend to full FOV
+        left_px   = float(min(tl[0], bl[0]))
+        right_px  = float(max(tr[0], br[0]))
+        top_px    = float(min(tl[1], tr[1]))
+        bottom_px = float(max(bl[1], br[1]))
+        a4_bbox_w = right_px - left_px
+        a4_bbox_h = bottom_px - top_px
+
+        if a4_bbox_w > 10 and a4_bbox_h > 10:
+            # One mm/px from A4 (separate axes = actual physical proportions)
+            mm_px_X = 210.0 / a4_bbox_w
+            mm_px_Y = 297.0 / a4_bbox_h
+
+            # A4 arm-mm bounds
+            A4_L, A4_R = 0.0, 210.0
+            A4_T, A4_B = -75.0, 222.0
+
+            # Extend A4 bounds by camera margin to get FOV
+            fov_left   = A4_L - left_px * mm_px_X
+            fov_right  = A4_R + (cam_w - right_px) * mm_px_X
+            fov_top    = A4_T - top_px * mm_px_Y
+            fov_bottom = A4_B + (cam_h - bottom_px) * mm_px_Y
+
+            # Axis-aligned rectangle
+            cam_frame_arm = [
+                [round(fov_right, 1), round(fov_top, 1)],
+                [round(fov_left, 1),  round(fov_top, 1)],
+                [round(fov_left, 1),  round(fov_bottom, 1)],
+                [round(fov_right, 1), round(fov_bottom, 1)],
+            ]
     pieces_arm = []
     for pp in pieces:
         pick_arm = list(image_to_arm(pp.pickup_x_image, pp.pickup_y_image))
@@ -2397,7 +2445,7 @@ def _build_tjc_state(pieces, reconst, fps=0, last_action="", selected_mode="AUTO
     if reconst and reconst.plan:
         info["assembly_order"] = [str(it["piece_id"]) for it in reconst.plan]
 
-    return pieces_arm, plan_items, info
+    return pieces_arm, plan_items, info, a4_rot, cam_frame_arm
 
 
 def main():
@@ -2469,6 +2517,7 @@ def main():
     frame_count = 0
 
     fps_start = time.time()
+    fps_val = 0
 
     a4_detect_interval = 1.5
 
@@ -3050,16 +3099,25 @@ def main():
                 if _tjc_counter[0] % 4 == 0 or SharedState.frozen != _tjc_last_frozen[0]:
                     _tjc_last_frozen[0] = SharedState.frozen
                     try:
-                        pa, pl, inf = _build_tjc_state(latest_pieces, latest_reconst,
-                                                       fps_val, SharedState.last_action_msg,
-                                                       SharedState.current_mode)
+                        a4_corners_cam = None
+                        if SharedState.calib_data and SharedState.calib_data.get("corners"):
+                            a4_corners_cam = SharedState.calib_data["corners"]
+                        fh, fw = frame.shape[:2]
+                        pa, pl, inf, a4_rot, cam_frame = _build_tjc_state(
+                            latest_pieces, latest_reconst,
+                            fps_val, SharedState.last_action_msg,
+                            SharedState.current_mode,
+                            a4_corners_camera=a4_corners_cam,
+                            cam_w=fw, cam_h=fh)
                         draw_state(tjc, pa, pl, inf,
                                    frozen=SharedState.frozen,
                                    recognition=SharedState.recognition_active,
                                    arm_status=SharedState.arm_status,
                                    pi_status=SharedState.pi_status,
                                    task_status=SharedState.task_status,
-                                   project_loaded=True)
+                                   project_loaded=True,
+                                   a4_rotation_deg=a4_rot,
+                                   cam_frame_arm=cam_frame)
                     except Exception as e:
                         log_print(f"TJC error: {e}")
 
