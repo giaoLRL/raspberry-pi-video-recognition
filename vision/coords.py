@@ -42,17 +42,19 @@ def image_to_arm(center_x_image: float, center_y_image: float) -> tuple[float, f
 
 
 def solver_to_arm(solver_x: float, solver_y: float) -> tuple[float, float]:
-    """solver ?? (TL??, X?, Y?) ? arm ?? (pick/display ???)
+    """solver coords (TL origin, X right, Y down) -> arm coords (same as image_to_arm)
 
     Args:
-        solver_x: solver ??? x (mm from left edge, rightward)
-        solver_y: solver ??? y (mm from top edge, downward)
+        solver_x: solver x (mm from left edge, rightward)
+        solver_y: solver y (mm from top edge, downward)
 
     Returns:
-        (arm_x_mm, arm_y_mm): arm ?? (? image_to_arm ???)
+        (arm_x_mm, arm_y_mm): arm coords, consistent with image_to_arm
+          arm_x = (WARP_WIDTH-1)/ppm - solver_x = 209.75 - solver_x
+          arm_y = solver_y - ORIGIN_WY/ppm = solver_y - 75
     """
-    x_mm = A4_WIDTH_MM - solver_x      # ?? = ?? - solver??
-    y_mm = solver_y - (ORIGIN_WY / PIXELS_PER_MM)  # ?? = solver?? - 75mm
+    x_mm = (ORIGIN_WX / PIXELS_PER_MM) - solver_x  # 209.75 - solver_x (aligns with image_to_arm)
+    y_mm = solver_y - (ORIGIN_WY / PIXELS_PER_MM)  # solver_y - 75
     return (x_mm, y_mm)
 
 
