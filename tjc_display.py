@@ -40,10 +40,12 @@ ARM_Y0, ARM_Y1 = -75.0, 222.0         # Y: top to bottom
 ARM_W = ARM_X1 - ARM_X0               # 210 mm
 ARM_H = ARM_Y1 - ARM_Y0               # 297 mm
 
-# Uniform scale, no rotation
-SCALE = min(UW / ARM_W, UH / ARM_H) * 0.80
-A4_PX_W = ARM_W * SCALE
-A4_PX_H = ARM_H * SCALE
+# Axes swapped: arm Y (297 mm, long side) -> screen X (horizontal),
+# arm X (210 mm, short side) -> screen Y (vertical).
+# SCALE uses the effective dimensions after swap.
+SCALE = min(UW / ARM_H, UH / ARM_W) * 0.70
+A4_PX_W = ARM_H * SCALE                  # 297 mm -> screen X
+A4_PX_H = ARM_W * SCALE                  # 210 mm -> screen Y
 A4_OX = MG + (UW - A4_PX_W) / 2
 A4_OY = MG + UI_TOP + (UH - A4_PX_H) / 2
 
@@ -54,9 +56,12 @@ PC = [R, G, BL, C, M, Y_C, 42280, 21140]
 
 
 def arm_to_screen(ax, ay):
-    """arm-mm to screen pixel (uniform scale, no rotation)."""
-    sx = int(A4_OX + (ARM_X1 - ax) * SCALE)
-    sy = int(A4_OY + (ay - ARM_Y0) * SCALE)
+    """arm-mm to screen pixel (axes swapped, uniform scale).
+
+    Arm Y (long side, 297 mm) -> screen X (horizontal).
+    Arm X (short side, 210 mm) -> screen Y (vertical)."""
+    sx = int(A4_OX + (ay - ARM_Y0) * SCALE)
+    sy = int(A4_OY + (ARM_X1 - ax) * SCALE)
     return max(0, min(SW - 1, sx)), max(0, min(SH - 1, sy))
 
 
@@ -347,9 +352,9 @@ def draw_state(tjc,
 def recalc_layout():
     global SCALE, A4_PX_W, A4_PX_H, A4_OX, A4_OY, UH
     UH = SH - MG * 2 - UI_TOP - UI_BOT
-    SCALE = min(UW / ARM_W, UH / ARM_H) * 0.80
-    A4_PX_W = ARM_W * SCALE
-    A4_PX_H = ARM_H * SCALE
+    SCALE = min(UW / ARM_H, UH / ARM_W) * 0.70
+    A4_PX_W = ARM_H * SCALE
+    A4_PX_H = ARM_W * SCALE
     A4_OX = MG + (UW - A4_PX_W) / 2
     A4_OY = MG + UI_TOP + (UH - A4_PX_H) / 2
 

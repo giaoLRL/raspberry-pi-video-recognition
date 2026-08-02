@@ -68,7 +68,7 @@ from system_check import arm_check, pi_check, StatusReporter
 
 # ============================================================
 
-CAMERA_INDEX = 1
+CAMERA_INDEX = 0
 
 WARP_WIDTH = 840
 
@@ -2385,9 +2385,25 @@ def _build_tjc_state(pieces, reconst, fps=0, last_action="", selected_mode="AUTO
         a4_bbox_h = bottom_px - top_px
 
         if a4_bbox_w > 10 and a4_bbox_h > 10:
-            # One mm/px from A4 (separate axes = actual physical proportions)
-            mm_px_X = 210.0 / a4_bbox_w
-            mm_px_Y = 297.0 / a4_bbox_h
+            # Rotation-invariant mm/px from A4 polygon area.
+            # The axis-aligned bbox of a rotated A4 does not match the
+            # projected 210×297 mm edges, which would shrink the camera
+            # frame and make the A4 outline appear outside it.
+            area_px = 0.5 * abs(
+                tl[0]*tr[1] + tr[0]*br[1] + br[0]*bl[1] + bl[0]*tl[1] -
+                tr[0]*tl[1] - br[0]*tr[1] - bl[0]*br[1] - tl[0]*bl[1]
+            )
+            if area_px > 1.0:
+                mm_px = math.sqrt(210.0 * 297.0 / area_px)
+            else:
+                # Degenerate quad — fall back to edge-length estimate
+                top_len = math.hypot(tr[0] - tl[0], tr[1] - tl[1])
+                left_len = math.hypot(bl[0] - tl[0], bl[1] - tl[1])
+                if top_len > left_len:
+                    mm_px = 0.5 * (297.0 / max(top_len, 1.0) + 210.0 / max(left_len, 1.0))
+                else:
+                    mm_px = 0.5 * (210.0 / max(top_len, 1.0) + 297.0 / max(left_len, 1.0))
+            mm_px_X = mm_px_Y = mm_px
 
             # A4 arm-mm bounds
             A4_L, A4_R = 0.0, 210.0
@@ -2399,7 +2415,8 @@ def _build_tjc_state(pieces, reconst, fps=0, last_action="", selected_mode="AUTO
             fov_top    = A4_T - top_px * mm_px_Y
             fov_bottom = A4_B + (cam_h - bottom_px) * mm_px_Y
 
-            # Axis-aligned rectangle
+            # arm_to_screen swaps axes (Y→screen X, X→screen Y).
+            # Keep [X,Y] format — arm_to_screen handles the swap.
             cam_frame_arm = [
                 [round(fov_right, 1), round(fov_top, 1)],
                 [round(fov_left, 1),  round(fov_top, 1)],
