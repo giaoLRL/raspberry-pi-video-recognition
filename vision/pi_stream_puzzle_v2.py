@@ -180,6 +180,10 @@ class DetectedPiece:
 
     center_y_image: float
 
+    pickup_x_image: float  # safe_interior_point in warp px
+
+    pickup_y_image: float
+
     area_px: float
 
     vertices: list
@@ -557,6 +561,16 @@ def detect_pieces(calibrated_region: np.ndarray) -> tuple[list[DetectedPiece], n
 
         center_y_output = (WARP_WIDTH - 1) - center_x_image
 
+        # Compute safe_interior_point (pole of inaccessibility) for pickup
+        poly_px = np.asarray(candidate["polygon"], dtype=np.float64).reshape(-1, 2)
+        poly_mm = poly_px / PIXELS_PER_MM
+        try:
+            pickup_mm = safe_interior_point(poly_mm, resolution_mm=0.5)
+        except (cv2.error, ValueError, RuntimeError):
+            pickup_mm = solver_polygon_centroid(poly_mm)
+        pickup_x_image = float(pickup_mm[0] * PIXELS_PER_MM)
+        pickup_y_image = float(pickup_mm[1] * PIXELS_PER_MM)
+
         pieces.append(DetectedPiece(
 
             piece_id=index,
@@ -568,6 +582,10 @@ def detect_pieces(calibrated_region: np.ndarray) -> tuple[list[DetectedPiece], n
             center_x_image=center_x_image,
 
             center_y_image=center_y_image,
+
+            pickup_x_image=pickup_x_image,
+
+            pickup_y_image=pickup_y_image,
 
             area_px=candidate["area"],
 
@@ -1070,14 +1088,13 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
         cv2.polylines(out, [np.round(corners).astype(np.int32)], True, (255, 255, 0), 2, cv2.LINE_AA)
 
     # Draw detected pieces
-    piece_camera_centroids = {}  # piece_id -> (cx, cy) in camera pixels
+    piece_pickup_camera = {}  # piece_id -> (cx, cy) in camera pixels
     if w2c is not None:
 
         for p in pieces:
 
-            # Convert piece center (warp px) to physical coords (mm)
-
-            px_mm, py_mm = image_to_arm(p.center_x_image, p.center_y_image)
+            # Convert pickup point (warp px) to arm-mm coords
+            px_mm, py_mm = image_to_arm(p.pickup_x_image, p.pickup_y_image)
 
 
             # Original contour (thin grey)
@@ -1092,9 +1109,9 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
 
             cv2.polylines(out, [np.round(pcam).astype(np.int32)], True, (0, 255, 255), 3, cv2.LINE_AA)
 
-            # Pickup point (red filled circle)
+            # Pickup point = safe_interior_point (red filled circle)
 
-            ccam = warp_to_camera(np.array([[[p.center_x_image, p.center_y_image]]], dtype=np.float32), w2c)[0]
+            ccam = warp_to_camera(np.array([[[p.pickup_x_image, p.pickup_y_image]]], dtype=np.float32), w2c)[0]
 
             cxi, cyi = int(ccam[0]), int(ccam[1])
 
@@ -1102,8 +1119,8 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
 
             cv2.circle(out, (cxi, cyi), 10, (0, 0, 255), 2, cv2.LINE_AA)
 
-            # Save camera centroid for connecting-line reference
-            piece_camera_centroids[p.piece_id] = (cxi, cyi)
+            # Save pickup camera coords for connecting-line reference
+            piece_pickup_camera[p.piece_id] = (cxi, cyi)
 
             # ID label
 
@@ -1204,7 +1221,7 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
 
             cv2.polylines(out, [pcam], True, (0, 0, 255), 1, cv2.LINE_AA)
 
-            # ── Target centroid + connecting line (color-coded per piece) ──
+            # ── Place point (safe_interior at target) + connecting line ──
             # Distinct BGR colors for up to 6 pieces
             LINE_PALETTE = [
                 (255, 0, 255),   # Magenta
@@ -1216,28 +1233,28 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
             ]
             line_color = LINE_PALETTE[(idx - 1) % len(LINE_PALETTE)]
 
-            # Compute target polygon centroid in arm mm
-            tc_arm = np.mean(poly_arm, axis=0)  # [x_mm, y_mm] in arm coords
-            tc_wx, tc_wy = arm_to_warp(float(tc_arm[0]), float(tc_arm[1]))
+            # place_mm is the safe_interior_point at target, already in arm-mm
+            place_arm = np.array(item["place_mm"], dtype=np.float64)  # [x_mm, y_mm]
+            tc_wx, tc_wy = arm_to_warp(float(place_arm[0]), float(place_arm[1]))
             tc_cam = warp_to_camera(np.array([[[tc_wx, tc_wy]]], dtype=np.float32), w2c)[0]
             tc_cx, tc_cy = int(round(tc_cam[0])), int(round(tc_cam[1]))
 
-            # Find matching original piece centroid and draw connecting line
+            # Find matching original pickup point and draw connecting line
             if isinstance(pid, str) and pid.startswith("piece_"):
                 piece_num = int(pid.split("_")[1])
             else:
                 piece_num = int(pid) if pid is not None else idx
-            if piece_num in piece_camera_centroids:
-                orig_cx, orig_cy = piece_camera_centroids[piece_num]
-                # Color-coded line: original centroid → target centroid
+            if piece_num in piece_pickup_camera:
+                orig_cx, orig_cy = piece_pickup_camera[piece_num]
+                # Color-coded line: original pickup → target place
                 cv2.line(out, (orig_cx, orig_cy), (tc_cx, tc_cy), line_color, 2, cv2.LINE_AA)
 
-            # Target centroid marker (color matches the connecting line)
+            # Target place marker (color matches the connecting line)
             cv2.circle(out, (tc_cx, tc_cy), 7, line_color, -1)
             cv2.circle(out, (tc_cx, tc_cy), 11, line_color, 2, cv2.LINE_AA)
 
-            # Target centroid coordinate label (color matches the marker)
-            tcoord_str = f"({tc_arm[0]:.1f},{tc_arm[1]:.1f})mm"
+            # Target place coordinate label (color matches the marker)
+            tcoord_str = f"({place_arm[0]:.1f},{place_arm[1]:.1f})mm"
             (tw, th), _ = cv2.getTextSize(tcoord_str, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 2)
             cv2.rectangle(out,
                           (tc_cx - tw // 2 - 4, tc_cy + 14 - th - 2),
@@ -1247,8 +1264,8 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
                         (tc_cx - tw // 2, tc_cy + 14),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.42, line_color, 2, cv2.LINE_AA)
 
-            # Log target centroid
-            print(f"[TARGET] {pid}: centroid=({tc_arm[0]:.1f},{tc_arm[1]:.1f})mm", flush=True)
+            # Log target place point
+            print(f"[TARGET] {pid}: place=({place_arm[0]:.1f},{place_arm[1]:.1f})mm", flush=True)
 
         if tpts:
 
@@ -2685,7 +2702,7 @@ def main():
 
                                 for pp in latest_pieces:
 
-                                    px_mm, py_mm = image_to_arm(pp.center_x_image, pp.center_y_image)
+                                    px_mm, py_mm = image_to_arm(pp.pickup_x_image, pp.pickup_y_image)
 
                                     pid_str = f"piece_{pp.piece_id}"
 
