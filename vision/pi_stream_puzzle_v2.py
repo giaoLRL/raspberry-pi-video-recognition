@@ -1070,7 +1070,7 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
         cv2.polylines(out, [np.round(corners).astype(np.int32)], True, (255, 255, 0), 2, cv2.LINE_AA)
 
     # Draw detected pieces
-
+    piece_camera_centroids = {}  # piece_id -> (cx, cy) in camera pixels
     if w2c is not None:
 
         for p in pieces:
@@ -1101,6 +1101,9 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
             cv2.circle(out, (cxi, cyi), 7, (0, 0, 255), -1)
 
             cv2.circle(out, (cxi, cyi), 10, (0, 0, 255), 2, cv2.LINE_AA)
+
+            # Save camera centroid for connecting-line reference
+            piece_camera_centroids[p.piece_id] = (cxi, cyi)
 
             # ID label
 
@@ -1200,6 +1203,52 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
             # 红色1px：同源数据验证
 
             cv2.polylines(out, [pcam], True, (0, 0, 255), 1, cv2.LINE_AA)
+
+            # ── Target centroid + connecting line (color-coded per piece) ──
+            # Distinct BGR colors for up to 6 pieces
+            LINE_PALETTE = [
+                (255, 0, 255),   # Magenta
+                (255, 255, 0),   # Cyan
+                (0, 140, 255),   # Orange
+                (0, 255, 128),   # Lime green
+                (0, 255, 255),   # Yellow
+                (128, 0, 255),   # Pink
+            ]
+            line_color = LINE_PALETTE[(idx - 1) % len(LINE_PALETTE)]
+
+            # Compute target polygon centroid in arm mm
+            tc_arm = np.mean(poly_arm, axis=0)  # [x_mm, y_mm] in arm coords
+            tc_wx, tc_wy = arm_to_warp(float(tc_arm[0]), float(tc_arm[1]))
+            tc_cam = warp_to_camera(np.array([[[tc_wx, tc_wy]]], dtype=np.float32), w2c)[0]
+            tc_cx, tc_cy = int(round(tc_cam[0])), int(round(tc_cam[1]))
+
+            # Find matching original piece centroid and draw connecting line
+            if isinstance(pid, str) and pid.startswith("piece_"):
+                piece_num = int(pid.split("_")[1])
+            else:
+                piece_num = int(pid) if pid is not None else idx
+            if piece_num in piece_camera_centroids:
+                orig_cx, orig_cy = piece_camera_centroids[piece_num]
+                # Color-coded line: original centroid → target centroid
+                cv2.line(out, (orig_cx, orig_cy), (tc_cx, tc_cy), line_color, 2, cv2.LINE_AA)
+
+            # Target centroid marker (color matches the connecting line)
+            cv2.circle(out, (tc_cx, tc_cy), 7, line_color, -1)
+            cv2.circle(out, (tc_cx, tc_cy), 11, line_color, 2, cv2.LINE_AA)
+
+            # Target centroid coordinate label (color matches the marker)
+            tcoord_str = f"({tc_arm[0]:.1f},{tc_arm[1]:.1f})mm"
+            (tw, th), _ = cv2.getTextSize(tcoord_str, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 2)
+            cv2.rectangle(out,
+                          (tc_cx - tw // 2 - 4, tc_cy + 14 - th - 2),
+                          (tc_cx + tw // 2 + 4, tc_cy + 14 + 2),
+                          (0, 0, 0), -1, cv2.LINE_AA)
+            cv2.putText(out, tcoord_str,
+                        (tc_cx - tw // 2, tc_cy + 14),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, line_color, 2, cv2.LINE_AA)
+
+            # Log target centroid
+            print(f"[TARGET] {pid}: centroid=({tc_arm[0]:.1f},{tc_arm[1]:.1f})mm", flush=True)
 
         if tpts:
 
@@ -1619,6 +1668,9 @@ class SharedState:
 
     freeze_data = None  # dict: pieces, solve_info, etc.
 
+    # Calibration data for web crosshair (arm-mm coordinate display)
+    calib_data = None  # dict: corners, c2w, ppm, origin_wx, origin_wy, has_calib
+
     # Auto-freeze stability tracking
 
     _stability_counter = 0
@@ -1749,9 +1801,13 @@ body{background:#111;color:#fff;font:14px/1.5 monospace}
 
 .top{display:flex;height:calc(100vh - 140px)}
 
-.video{flex:1;display:flex;align-items:center;justify-content:center}
+.video{flex:1;display:flex;align-items:center;justify-content:center;position:relative;cursor:crosshair}
 
-.video img{max-width:100%;max-height:100%}
+.video img{max-width:100%;max-height:100%;display:block}
+
+.video canvas{position:absolute;top:0;left:0;pointer-events:none;z-index:10}
+
+.crosshair-tip{position:absolute;pointer-events:none;z-index:20;color:#0f0;font:bold 12px monospace;background:rgba(0,0,0,0.8);padding:3px 7px;border-radius:4px;border:1px solid #0f0;white-space:nowrap;display:none}
 
 .ctrl{position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,0.95);padding:10px;display:flex;flex-wrap:wrap;gap:6px;justify-content:center;z-index:100;border-top:2px solid #333}
 
@@ -1797,7 +1853,7 @@ body{background:#111;color:#fff;font:14px/1.5 monospace}
 
 <div class=info id=info>Loading...</div>
 
-<div class=top><div class=video><img id=stream src=/stream></div></div>
+<div class=top><div class=video id=video_container><img id=stream src=/stream><canvas id=crosshair></canvas><div class=crosshair-tip id=coord_tip></div></div></div>
 
 <div class=mode-bar id=mode_bar>Mode: AUTO</div>
 
@@ -1850,6 +1906,128 @@ function act(cmd){fetch('/action?cmd='+cmd).then(r=>r.text()).then(t=>{
  if(cmd=='F'){var b=document.getElementById('btn_f');var on=t.includes('FROZEN');b.className=on?'btn-f-on':'btn-f-off';b.textContent=on?'F:FROZEN':'F:OFF';}
 
 })}
+
+// ---- Crosshair: mouse hover shows ARM-mm coords (A4 area only) ----
+(function(){
+ var img=document.getElementById('stream'),
+     canvas=document.getElementById('crosshair'),
+     tip=document.getElementById('coord_tip'),
+     container=document.getElementById('video_container'),
+     ctx=canvas.getContext('2d');
+
+ var calib=null; // {has_calib, corners, c2w, ppm, origin_wx, origin_wy}
+
+ // Fetch calibration data every 3s
+ function fetchCalib(){
+   fetch('/calib_data').then(function(r){return r.json()}).then(function(d){
+     calib=d.has_calib?d:null;
+   }).catch(function(){calib=null;});
+ }
+ fetchCalib();
+ setInterval(fetchCalib,3000);
+
+ function syncCanvas(){
+   var r=img.getBoundingClientRect(),
+       cr=container.getBoundingClientRect();
+   var ox=r.left-cr.left, oy=r.top-cr.top;
+   canvas.style.left=ox+'px';
+   canvas.style.top=oy+'px';
+   canvas.width=r.width;
+   canvas.height=r.height;
+ }
+ img.addEventListener('load',syncCanvas);
+ window.addEventListener('resize',syncCanvas);
+ setInterval(syncCanvas,2000);
+
+ function hideCrosshair(){
+   ctx.clearRect(0,0,canvas.width,canvas.height);
+   tip.style.display='none';
+ }
+
+ // Perspective transform: camera-img-px -> warp-px
+ function transformPoint(x,y,matrix){
+   var u=matrix[0][0]*x+matrix[0][1]*y+matrix[0][2];
+   var v=matrix[1][0]*x+matrix[1][1]*y+matrix[1][2];
+   var w=matrix[2][0]*x+matrix[2][1]*y+matrix[2][2];
+   return [u/w, v/w];
+ }
+
+ // Warp-px -> arm-mm (matching coords.py image_to_arm)
+ function warpToArm(wx,wy,ppm,ox,oy){
+   return [(ox-wx)/ppm, (wy-oy)/ppm];
+ }
+
+ // Point in polygon (ray-casting)
+ function pointInPolygon(px,py,poly){
+   var inside=false;
+   for(var i=0,j=poly.length-1;i<poly.length;j=i++){
+     var xi=poly[i][0], yi=poly[i][1];
+     var xj=poly[j][0], yj=poly[j][1];
+     if((yi>py)!==(yj>py) && px<(xj-xi)*(py-yi)/(yj-yi)+xi) inside=!inside;
+   }
+   return inside;
+ }
+
+ container.addEventListener('mousemove',function(e){
+   var r=img.getBoundingClientRect();
+   var dx=e.clientX-r.left, dy=e.clientY-r.top;
+   if(dx<0||dy<0||dx>r.width||dy>r.height){hideCrosshair();return;}
+
+   var scaleX=img.naturalWidth/r.width, scaleY=img.naturalHeight/r.height;
+   var px=dx*scaleX, py=dy*scaleY;
+
+   // Check calibration + A4 boundary
+   var insideA4=false, armX=0, armY=0;
+   if(calib && calib.corners){
+     insideA4=pointInPolygon(px,py,calib.corners);
+     if(insideA4){
+       var wp=transformPoint(px,py,calib.c2w);
+       var arm=warpToArm(wp[0],wp[1],calib.ppm,calib.origin_wx,calib.origin_wy);
+       armX=arm[0]; armY=arm[1];
+     }
+   }
+
+   if(!insideA4){hideCrosshair();return;}
+
+   syncCanvas();
+   ctx.clearRect(0,0,canvas.width,canvas.height);
+
+   // Dashed crosshair lines (green = valid ARM coords)
+   ctx.strokeStyle='rgba(0,255,0,0.7)';
+   ctx.lineWidth=1;
+   ctx.setLineDash([5,5]);
+
+   ctx.beginPath();
+   ctx.moveTo(0,dy);
+   ctx.lineTo(canvas.width,dy);
+   ctx.stroke();
+
+   ctx.beginPath();
+   ctx.moveTo(dx,0);
+   ctx.lineTo(dx,canvas.height);
+   ctx.stroke();
+
+   ctx.setLineDash([]);
+
+   // Solid center dot
+   ctx.fillStyle='#0f0';
+   ctx.beginPath();
+   ctx.arc(dx,dy,4,0,Math.PI*2);
+   ctx.fill();
+
+   // Coordinate tip in arm mm
+   tip.textContent='('+armX.toFixed(1)+', '+armY.toFixed(1)+') mm';
+   var cr=container.getBoundingClientRect();
+   var tx=e.clientX-cr.left+16, ty=e.clientY-cr.top+16;
+   if(tx+130>cr.width) tx=e.clientX-cr.left-140;
+   if(ty+26>cr.height) ty=e.clientY-cr.top-30;
+   tip.style.left=tx+'px';
+   tip.style.top=ty+'px';
+   tip.style.display='block';
+ });
+
+ container.addEventListener('mouseleave',hideCrosshair);
+})();
 
 setInterval(function(){fetch('/status').then(r=>r.json()).then(d=>{
 
@@ -2028,6 +2206,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 fd = SharedState.freeze_data if SharedState.freeze_data is not None else {"frozen": False, "pieces": [], "message": "No freeze data available"}
 
             self.wfile.write(json.dumps(fd).encode())
+
+        elif self.path == "/calib_data":
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            with SharedState.lock:
+                cd = SharedState.calib_data if SharedState.calib_data is not None else {"has_calib": False}
+            self.wfile.write(json.dumps(cd).encode())
 
         elif self.path == "/status":
 
@@ -2392,6 +2579,17 @@ def main():
 
                     c2w, w2c = build_matrices(corners)
 
+                    # Sync calibration to SharedState for web crosshair (arm-mm)
+                    with SharedState.lock:
+                        SharedState.calib_data = {
+                            "has_calib": True,
+                            "corners": corners.tolist(),
+                            "c2w": c2w.tolist(),
+                            "ppm": round(PIXELS_PER_MM, 4),
+                            "origin_wx": WARP_WIDTH - 1,
+                            "origin_wy": 300.0,
+                        }
+
                 last_a4_detect = now
 
 
@@ -2719,6 +2917,17 @@ def main():
                     c2w, w2c = build_matrices(corners)
 
                     use_auto_detect = False
+
+                    # Sync calibration to SharedState for web crosshair (arm-mm)
+                    with SharedState.lock:
+                        SharedState.calib_data = {
+                            "has_calib": True,
+                            "corners": corners.tolist(),
+                            "c2w": c2w.tolist(),
+                            "ppm": round(PIXELS_PER_MM, 4),
+                            "origin_wx": WARP_WIDTH - 1,
+                            "origin_wy": 300.0,
+                        }
 
                     log_print("C: calibration saved")
 
