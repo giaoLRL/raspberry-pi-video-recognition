@@ -7,7 +7,6 @@
 Pi Puzzle Stream V2 — Blob-style board detection (like K230 2.py).
 
 
-
 Detection: Otsu blob → bounding box → no polygon/quad fitting needed.
 
            Camera is top-down, no perspective warp required.
@@ -29,7 +28,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-
 import cv2
 
 import numpy as np
@@ -43,7 +41,6 @@ import threading
 import queue
 
 
-
 # Add project path
 
 PROJECT_DIR = Path("/home/man/puzzle_app")
@@ -51,7 +48,6 @@ PROJECT_DIR = Path("/home/man/puzzle_app")
 if str(PROJECT_DIR) not in sys.path:
 
     sys.path.insert(0, str(PROJECT_DIR))
-
 
 
 from puzzle_vision.config import load_config
@@ -81,7 +77,6 @@ from puzzle_vision.solver import SolveError, solve_card, solve_fixed, solve_taug
 from serial_protocol import send_and_wait_done, start_listener   # bidirectional serial
 
 
-
 # ============================================================
 
 # Parameters (identical to original pick_base_rdk_solver.py)
@@ -93,7 +88,6 @@ CAMERA_INDEX = 0
 WARP_WIDTH = 840
 
 WARP_HEIGHT = 1188
-
 
 
 A4_WIDTH_CM = 21.0
@@ -113,7 +107,6 @@ PIXELS_PER_MM = (PIXELS_PER_MM_X + PIXELS_PER_MM_Y) * 0.5
 PIXELS_PER_CM = PIXELS_PER_MM * 10.0
 
 
-
 MIN_PIECE_AREA_CM2 = 3.0
 
 MAX_PIECE_AREA_CM2 = 115.0
@@ -121,7 +114,6 @@ MAX_PIECE_AREA_CM2 = 115.0
 MIN_PIECE_AREA_PX = int(round(MIN_PIECE_AREA_CM2 * PIXELS_PER_CM ** 2))
 
 MAX_PIECE_AREA_PX = int(round(MAX_PIECE_AREA_CM2 * PIXELS_PER_CM ** 2))
-
 
 
 MIN_SIDES = 3
@@ -135,7 +127,6 @@ MIN_PIECE_SHORT_SIDE_PX = 24.0
 MIN_FILL_RATIO = 0.20  # 轮廓面积/外接矩形面积，过滤空心大框
 
 
-
 CALIBRATION_FILE = Path("/home/man/puzzle_app") / "a4_corners.json"
 
 SOLVER_CONFIG_FILE = Path("/home/man/puzzle_app") / "config.json"
@@ -143,7 +134,6 @@ SOLVER_CONFIG_FILE = Path("/home/man/puzzle_app") / "config.json"
 TAUGHT_LAYOUT_FILE = Path("/home/man/puzzle_app") / "taught_layout.json"
 
 MAX_DETECTED_PIECES = 4
-
 
 
 RECOVERY_MODES = ("auto", "fixed", "unknown-white", "unknown-pattern")
@@ -161,11 +151,9 @@ RECOVERY_MODE_NAMES = {
 }
 
 
-
 AUTO_FIXED_STRONG_ERROR_MM = 7.0
 
 AUTO_PATTERN_SCORE_THRESHOLD = 0.012
-
 
 
 PORT = 8080
@@ -187,7 +175,6 @@ ORIGIN_FRACTION_OF_LONG_EDGE = 0.25
 JPEG_QUALITY = 80
 
 STREAM_FPS = 15
-
 
 
 # ============================================================
@@ -219,7 +206,6 @@ class DetectedPiece:
     polygon: np.ndarray
 
 
-
 @dataclass
 
 class RecoveryResult:
@@ -239,7 +225,6 @@ class RecoveryResult:
     solve_time_sec: float
 
     attempts: list[dict[str, Any]]
-
 
 
 # ============================================================
@@ -267,7 +252,6 @@ def order_points(pts: np.ndarray) -> np.ndarray:
     return rect
 
 
-
 def load_corners() -> Optional[np.ndarray]:
 
     if not CALIBRATION_FILE.exists():
@@ -289,7 +273,6 @@ def load_corners() -> Optional[np.ndarray]:
     except Exception:
 
         return None
-
 
 
 def build_matrices(corners: np.ndarray):
@@ -319,11 +302,6 @@ def build_matrices(corners: np.ndarray):
     return c2w, w2c
 
 
-
-
-
-
-
 def refine_corners_by_edges(frame, corners):
 
     TW, TH = WARP_WIDTH, WARP_HEIGHT
@@ -339,7 +317,6 @@ def refine_corners_by_edges(frame, corners):
     warped = cv2.warpPerspective(frame, H, (TW, TH))
 
 
-
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -349,13 +326,11 @@ def refine_corners_by_edges(frame, corners):
     edges = cv2.dilate(edges, None, iterations=1)
 
 
-
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     best_quad = None
 
     best_score = -1
-
 
 
     for contour in contours:
@@ -407,7 +382,6 @@ def refine_corners_by_edges(frame, corners):
             break
 
 
-
     if best_quad is not None:
 
         H_inv = cv2.getPerspectiveTransform(dst, src)
@@ -423,13 +397,9 @@ def refine_corners_by_edges(frame, corners):
     return corners
 
 
-
-
-
 def auto_detect_a4(frame):
 
     """Detect A4 board using blob contour + approxPolyDP + A4 proportion constraint.
-
 
 
     Preserves perspective: corners follow actual board edges (not axis-aligned).
@@ -445,7 +415,6 @@ def auto_detect_a4(frame):
     _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
 
-
     kernel_big = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
 
     closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_big, iterations=1)
@@ -455,13 +424,11 @@ def auto_detect_a4(frame):
     closed = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, kernel, iterations=1)
 
 
-
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
 
         return None
-
 
 
     best = max(contours, key=cv2.contourArea)
@@ -475,7 +442,6 @@ def auto_detect_a4(frame):
         return None
 
 
-
     # Fit quadrilateral directly on the blob contour (preserves perspective)
 
     peri = cv2.arcLength(best, True)
@@ -483,7 +449,6 @@ def auto_detect_a4(frame):
     a4_landscape = 297.0 / 210.0
 
     a4_portrait = 210.0 / 297.0
-
 
 
     candidates = []
@@ -499,7 +464,6 @@ def auto_detect_a4(frame):
         quad = order_points(approx.reshape(4, 2).astype(np.float32))
 
 
-
         top = np.linalg.norm(quad[1] - quad[0])
 
         bottom = np.linalg.norm(quad[2] - quad[3])
@@ -507,7 +471,6 @@ def auto_detect_a4(frame):
         left = np.linalg.norm(quad[3] - quad[0])
 
         right = np.linalg.norm(quad[2] - quad[1])
-
 
 
         avg_w = (top + bottom) * 0.5
@@ -519,17 +482,14 @@ def auto_detect_a4(frame):
             continue
 
 
-
         ratio = avg_w / avg_h
 
         aspect_err = min(abs(ratio - a4_landscape), abs(ratio - a4_portrait))
 
 
-
         quad_area = cv2.contourArea(quad)
 
         candidates.append((aspect_err, -eps, quad_area, quad))
-
 
 
     if candidates:
@@ -549,9 +509,7 @@ def auto_detect_a4(frame):
         return None
 
 
-
     # Skip warp refinement for now - use raw approxPolyDP corners directly
-
 
 
     pct = area / (w * h) * 100
@@ -565,7 +523,6 @@ def auto_detect_a4(frame):
     )
 
     return corners
-
 
 
 def create_piece_mask(calibrated_region: np.ndarray) -> np.ndarray:
@@ -595,7 +552,6 @@ def create_piece_mask(calibrated_region: np.ndarray) -> np.ndarray:
     return mask
 
 
-
 def calculate_area_center(contour: np.ndarray) -> Optional[tuple[int, int]]:
 
     moments = cv2.moments(contour)
@@ -609,7 +565,6 @@ def calculate_area_center(contour: np.ndarray) -> Optional[tuple[int, int]]:
     center_y = int(round(moments["m01"] / moments["m00"]))
 
     return center_x, center_y
-
 
 
 def approximate_straight_polygon(contour: np.ndarray) -> Optional[np.ndarray]:
@@ -657,11 +612,9 @@ def approximate_straight_polygon(contour: np.ndarray) -> Optional[np.ndarray]:
     return candidates[0][1]
 
 
-
 def convert_polygon_vertices_to_output(polygon: np.ndarray) -> list[tuple[int, int]]:
 
     return [(int(round(p[0][0])), int(round(p[0][1]))) for p in polygon]
-
 
 
 def detect_pieces(calibrated_region: np.ndarray) -> tuple[list[DetectedPiece], np.ndarray]:
@@ -775,7 +728,6 @@ def detect_pieces(calibrated_region: np.ndarray) -> tuple[list[DetectedPiece], n
     return pieces, mask
 
 
-
 # ============================================================
 
 # Bridge: pick DetectedPiece -> puzzle_vision PieceObservation (original)
@@ -833,7 +785,6 @@ def detected_pieces_to_solver_observations(
         ))
 
     return observations
-
 
 
 # ============================================================
@@ -895,7 +846,6 @@ def estimate_pattern_score(
     return float(np.median(scores)) if scores else 0.0
 
 
-
 # ============================================================
 
 # Solver dispatch (original)
@@ -931,7 +881,6 @@ def load_solver_assets() -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
             taught_layout = None
 
     return config, taught_layout
-
 
 
 def run_one_solver_mode(
@@ -1013,9 +962,6 @@ def run_one_solver_mode(
     return plan, info
 
 
-
-
-
 def _mean_piece_y(pieces: list[DetectedPiece]) -> float:
 
     if not pieces:
@@ -1025,13 +971,7 @@ def _mean_piece_y(pieces: list[DetectedPiece]) -> float:
     return float(np.mean([p.center_y_image for p in pieces]))
 
 
-
-
-
 # _apply_fast_solver_budget removed — solver now runs with full config budget
-
-
-
 
 
 def _fmt(val: Any) -> str:
@@ -1049,7 +989,6 @@ def _fmt(val: Any) -> str:
     except (ValueError, TypeError):
 
         return str(val)
-
 
 
 def _solver_attempt_record(mode, accepted, elapsed, info=None, error=None):
@@ -1071,7 +1010,6 @@ def _solver_attempt_record(mode, accepted, elapsed, info=None, error=None):
         record["error"] = error
 
     return record
-
 
 
 def solve_with_pick_recognition(
@@ -1249,7 +1187,6 @@ def solve_with_pick_recognition(
     raise RuntimeError("All recovery modes failed: " + details)
 
 
-
 # ============================================================
 
 # Warp and overlay drawing
@@ -1261,273 +1198,9 @@ def warp_to_camera(pts, mat):
     r = np.asarray(pts, dtype=np.float32).reshape(-1, 1, 2)
 
     return cv2.perspectiveTransform(r, mat).reshape(-1, 2)
-
-
-
-def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
-
-    out = frame.copy()
-
-    if corners is not None:
-
-        cv2.polylines(out, [np.round(corners).astype(np.int32)], True, (255, 255, 0), 2, cv2.LINE_AA)
-
-    # Draw detected pieces
-
-    if w2c is not None:
-
-        for p in pieces:
-
-            # Convert piece center (warp px) to physical coords (mm)
-
-            # Origin on BL-TL line, 1/4 from BL. X upward, Y rightward.
-
-            px_mm = (WARP_HEIGHT - 1 - A4_HEIGHT_MM * ORIGIN_FRACTION * PIXELS_PER_MM - p.center_y_image) / PIXELS_PER_MM
-
-            py_mm = (WARP_HEIGHT - 1 - p.center_y_image) / PIXELS_PER_MM
-
-            # Original contour (thin grey)
-
-            ccam = warp_to_camera(p.contour, w2c)
-
-            cv2.drawContours(out, [np.round(ccam).astype(np.int32)], -1, (128, 128, 128), 1, cv2.LINE_AA)
-
-            # Simplified polygon (yellow)
-
-            pcam = warp_to_camera(p.polygon, w2c)
-
-            cv2.polylines(out, [np.round(pcam).astype(np.int32)], True, (0, 255, 255), 3, cv2.LINE_AA)
-
-            # Pickup point (red filled circle)
-
-            ccam = warp_to_camera(np.array([[[p.center_x_image, p.center_y_image]]], dtype=np.float32), w2c)[0]
-
-            cxi, cyi = int(ccam[0]), int(ccam[1])
-
-            cv2.circle(out, (cxi, cyi), 7, (0, 0, 255), -1)
-
-            cv2.circle(out, (cxi, cyi), 10, (0, 0, 255), 2, cv2.LINE_AA)
-
-            # ID label
-
-            cv2.putText(out, f"ID:{p.piece_id}",
-
-                        (cxi + 14, cyi - 18),
-
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
-
-            # Pickup coordinate in mm (white text with dark background for readability)
-
-            coord_str = f"({px_mm:.1f}, {py_mm:.1f})mm"
-
-            (tw, th), _ = cv2.getTextSize(coord_str, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-
-            cv2.rectangle(out,
-
-                          (cxi - tw // 2 - 4, cyi + 16 - th - 2),
-
-                          (cxi + tw // 2 + 4, cyi + 16 + 2),
-
-                          (0, 0, 0), -1, cv2.LINE_AA)
-
-            cv2.putText(out, coord_str,
-
-                        (cxi - tw // 2, cyi + 16),
-
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
-
-            # Log to console
-
-            area_mm2 = p.area_px / (PIXELS_PER_MM ** 2)
-
-            nv = len(p.polygon)
-
-            print(f"[PICKUP] ID:{p.piece_id} pos=({px_mm:.1f},{py_mm:.1f})mm area={area_mm2:.0f}mm2 sides={nv}", flush=True)
-
-    cv2.putText(out, f"Pieces: {len(pieces)}", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2, cv2.LINE_AA)
-
-    # Area reference boxes
-
-    if area_mode in (1, 2) and w2c is not None:
-
-        area_px = MIN_PIECE_AREA_PX if area_mode == 1 else MAX_PIECE_AREA_PX
-
-        label = "MIN AREA" if area_mode == 1 else "MAX AREA"
-
-        color = (0, 255, 0) if area_mode == 1 else (255, 0, 255)
-
-        side = int(np.sqrt(area_px))
-
-        cx_w, cy_w = WARP_WIDTH // 2, WARP_HEIGHT // 2
-
-        square_warp = np.array([[cx_w - side // 2, cy_w - side // 2],
-
-                                [cx_w + side // 2, cy_w - side // 2],
-
-                                [cx_w + side // 2, cy_w + side // 2],
-
-                                [cx_w - side // 2, cy_w + side // 2]], dtype=np.float32)
-
-        square_cam = np.round(warp_to_camera(square_warp, w2c)).astype(np.int32)
-
-        cv2.polylines(out, [square_cam], True, color, 3, cv2.LINE_AA)
-
-        cv2.putText(out, f"{label}: {area_px}px", (square_cam[0][0], square_cam[0][1] - 8),
-
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
-
-    # Reconstruction plan
-
-    if reconst is not None and reconst.plan and w2c is not None:
-
-        tpts = []
-
-        for idx, item in enumerate(reconst.plan, start=1):
-
-            pid = item.get("piece_id", idx)
-
-            # 绿色：求解器输出的放置命令位置（target_polygon_mm = 碎片最终放置目标）
-
-            # 注意：measured_target_polygon_mm 仅是诊断量（观测形状反映射），不是放置位置
-
-            poly_mm = np.asarray(item["target_polygon_mm"], dtype=np.float64)
-
-            poly_warp = poly_mm * PIXELS_PER_MM
-
-            pcam = np.round(warp_to_camera(poly_warp, w2c)).astype(np.int32)
-
-            tpts.append(pcam)
-
-            cv2.polylines(out, [pcam], True, (0, 255, 0), 3, cv2.LINE_AA)
-
-            # 碎片ID标签（绿色）
-
-            label_pos = tuple(pcam[0])
-
-            cv2.putText(out, f"#{pid}", (label_pos[0] - 5, label_pos[1] - 8),
-
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
-
-            # 红色1px：同源数据验证
-
-            cv2.polylines(out, [pcam], True, (0, 0, 255), 1, cv2.LINE_AA)
-
-        if tpts:
-
-            # 蓝框：优先使用求解器输出的目标矩形，回退到 minAreaRect
-
-            info = reconst.solver_info
-
-            target_origin = info.get("target_origin_mm")
-
-            target_size = info.get("target_size_mm")
-
-            if target_origin is not None and target_size is not None:
-
-                origin = np.asarray(target_origin, dtype=np.float64)
-
-                size   = np.asarray(target_size, dtype=np.float64)
-
-                rect_mm = np.array([
-
-                    origin,
-
-                    origin + [size[0], 0.0],
-
-                    origin + size,
-
-                    origin + [0.0, size[1]],
-
-                ], dtype=np.float64)
-
-                rect_warp = rect_mm * PIXELS_PER_MM
-
-                box = np.round(warp_to_camera(rect_warp, w2c)).astype(np.int32)
-
-            else:
-
-                merged = np.vstack(tpts)
-
-                box = np.round(cv2.boxPoints(cv2.minAreaRect(merged.astype(np.float32)))).astype(np.int32)
-
-            cv2.polylines(out, [box], True, (255, 0, 0), 2, cv2.LINE_AA)
-
-            if not hasattr(draw_overlay, "_last_box_hash"):
-
-                draw_overlay._last_box_hash = None
-
-            box_hash = hash(box.tobytes())
-
-            if box_hash != draw_overlay._last_box_hash:
-
-                draw_overlay._last_box_hash = box_hash
-
-                corners_str = ", ".join(f"({x},{y})" for x, y in box)
-
-                if target_size is not None:
-
-                    sz = np.asarray(target_size, dtype=np.float64)
-
-                    log_print(f"BlueBox: [{corners_str}] size={sz[0]:.1f}x{sz[1]:.1f}mm origin=({origin[0]:.1f},{origin[1]:.1f})")
-
-                else:
-
-                    log_print(f"BlueBox: [{corners_str}] (minAreaRect fallback)")
-
-        cv2.putText(out, f"Restored: {reconst.selected_mode}", (20, 70),
-
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 255, 0), 2, cv2.LINE_AA)
-
-    # ============================================================
-
-    # COORDINATE SYSTEM
-
-    #
-
-    #   TL(0,0) ─── SHORT 210mm ─── TR(839,0)
-
-    #   │                              │
-
-    #   │          A4 paper            │
-
-    #   │                              │
-
-    #   BL(0,1187) ─ SHORT 210mm ── BR(839,1187)
-
-    #
-
-    #   LONG edge: BL↔TL = 297mm, BL↔BR = 210mm (short)
-
-    #
-
-    #   X axis: BL → TL  (along left edge, positive upward)
-
-    #   Y axis: origin → perpendicular into paper (positive rightward)
-
-    #   Origin: on BL-TL, 1/4 from BL (74.25mm from BL)
-
-    #
-
-    #   Warp ↔ Physical:
-
-    #     x_mm = (WARP_H - 1 - wy) / PIXELS_PER_MM
-
-    #     y_mm = wx / PIXELS_PER_MM
-
-    #     wx = origin_wx - x_mm * PIXELS_PER_MM  # X positive = leftward
-
-    #     wy = WARP_H - 1 - x_mm * PIXELS_PER_MM
-
-    # ============================================================
-
-#!/usr/bin/env python3
-
-# -*- coding: utf-8 -*-
-
 """
 
 Pi Puzzle Stream - Web streaming + original pick detection + puzzle_vision solver.
-
 
 
 Detection: original pick_base Otsu + convex hull polygon (identical to main.py).
@@ -1549,7 +1222,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-
 import cv2
 
 import numpy as np
@@ -1563,7 +1235,6 @@ import threading
 import queue
 
 
-
 # Add project path
 
 PROJECT_DIR = Path("/home/man/puzzle_app")
@@ -1571,7 +1242,6 @@ PROJECT_DIR = Path("/home/man/puzzle_app")
 if str(PROJECT_DIR) not in sys.path:
 
     sys.path.insert(0, str(PROJECT_DIR))
-
 
 
 from puzzle_vision.config import load_config
@@ -1599,7 +1269,7 @@ from puzzle_vision.geometry import (
 from puzzle_vision.solver import SolveError, solve_card, solve_fixed, solve_taught, solve_unknown
 
 from serial_protocol import send_and_wait_done, start_listener   # bidirectional serial
-
+from coords import image_to_arm, solver_to_arm, arm_to_warp, arm_distance
 
 
 # ============================================================
@@ -1613,7 +1283,6 @@ CAMERA_INDEX = 0
 WARP_WIDTH = 840
 
 WARP_HEIGHT = 1188
-
 
 
 A4_WIDTH_CM = 21.0
@@ -1633,7 +1302,6 @@ PIXELS_PER_MM = (PIXELS_PER_MM_X + PIXELS_PER_MM_Y) * 0.5
 PIXELS_PER_CM = PIXELS_PER_MM * 10.0
 
 
-
 MIN_PIECE_AREA_CM2 = 3.0
 
 MAX_PIECE_AREA_CM2 = 115.0
@@ -1641,7 +1309,6 @@ MAX_PIECE_AREA_CM2 = 115.0
 MIN_PIECE_AREA_PX = int(round(MIN_PIECE_AREA_CM2 * PIXELS_PER_CM ** 2))
 
 MAX_PIECE_AREA_PX = int(round(MAX_PIECE_AREA_CM2 * PIXELS_PER_CM ** 2))
-
 
 
 MIN_SIDES = 3
@@ -1655,7 +1322,6 @@ MIN_PIECE_SHORT_SIDE_PX = 24.0
 MIN_FILL_RATIO = 0.20  # 轮廓面积/外接矩形面积，过滤空心大框
 
 
-
 CALIBRATION_FILE = Path("/home/man/puzzle_app") / "a4_corners.json"
 
 SOLVER_CONFIG_FILE = Path("/home/man/puzzle_app") / "config.json"
@@ -1663,7 +1329,6 @@ SOLVER_CONFIG_FILE = Path("/home/man/puzzle_app") / "config.json"
 TAUGHT_LAYOUT_FILE = Path("/home/man/puzzle_app") / "taught_layout.json"
 
 MAX_DETECTED_PIECES = 4
-
 
 
 RECOVERY_MODES = ("auto", "fixed", "unknown-white", "unknown-pattern")
@@ -1681,11 +1346,9 @@ RECOVERY_MODE_NAMES = {
 }
 
 
-
 AUTO_FIXED_STRONG_ERROR_MM = 7.0
 
 AUTO_PATTERN_SCORE_THRESHOLD = 0.012
-
 
 
 PORT = 8080
@@ -1709,7 +1372,6 @@ ORIGIN_FRACTION_OF_LONG_EDGE = 0.25
 JPEG_QUALITY = 80
 
 STREAM_FPS = 15
-
 
 
 # ============================================================
@@ -1741,7 +1403,6 @@ class DetectedPiece:
     polygon: np.ndarray
 
 
-
 @dataclass
 
 class RecoveryResult:
@@ -1761,7 +1422,6 @@ class RecoveryResult:
     solve_time_sec: float
 
     attempts: list[dict[str, Any]]
-
 
 
 # ============================================================
@@ -1789,7 +1449,6 @@ def order_points(pts: np.ndarray) -> np.ndarray:
     return rect
 
 
-
 def load_corners() -> Optional[np.ndarray]:
 
     if not CALIBRATION_FILE.exists():
@@ -1811,7 +1470,6 @@ def load_corners() -> Optional[np.ndarray]:
     except Exception:
 
         return None
-
 
 
 def build_matrices(corners: np.ndarray):
@@ -1841,15 +1499,11 @@ def build_matrices(corners: np.ndarray):
     return c2w, w2c
 
 
-
-
-
 def auto_detect_a4(frame):
 
     """Detect A4 board using Otsu thresholding (dark board, white dividing line)."""
 
     h, w = frame.shape[:2]
-
 
 
     # ── A4 detection: Otsu grayscale threshold ──
@@ -1861,7 +1515,6 @@ def auto_detect_a4(frame):
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
     _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
 
 
     # Bridge the white dividing line and close small holes.
@@ -1877,9 +1530,7 @@ def auto_detect_a4(frame):
     closed = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, kernel, iterations=1)
 
 
-
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
 
 
     candidates = []
@@ -1933,9 +1584,7 @@ def auto_detect_a4(frame):
         return candidates[0][1]
 
 
-
     return None
-
 
 
 # ============================================================
@@ -1971,7 +1620,6 @@ def create_piece_mask(calibrated_region: np.ndarray) -> np.ndarray:
     return mask
 
 
-
 def calculate_area_center(contour: np.ndarray) -> Optional[tuple[int, int]]:
 
     moments = cv2.moments(contour)
@@ -1985,7 +1633,6 @@ def calculate_area_center(contour: np.ndarray) -> Optional[tuple[int, int]]:
     center_y = int(round(moments["m01"] / moments["m00"]))
 
     return center_x, center_y
-
 
 
 def approximate_straight_polygon(contour: np.ndarray) -> Optional[np.ndarray]:
@@ -2033,11 +1680,9 @@ def approximate_straight_polygon(contour: np.ndarray) -> Optional[np.ndarray]:
     return candidates[0][1]
 
 
-
 def convert_polygon_vertices_to_output(polygon: np.ndarray) -> list[tuple[int, int]]:
 
     return [(int(round(p[0][0])), int(round(p[0][1]))) for p in polygon]
-
 
 
 def detect_pieces(calibrated_region: np.ndarray) -> tuple[list[DetectedPiece], np.ndarray]:
@@ -2151,7 +1796,6 @@ def detect_pieces(calibrated_region: np.ndarray) -> tuple[list[DetectedPiece], n
     return pieces, mask
 
 
-
 # ============================================================
 
 # Bridge: pick DetectedPiece -> puzzle_vision PieceObservation (original)
@@ -2209,7 +1853,6 @@ def detected_pieces_to_solver_observations(
         ))
 
     return observations
-
 
 
 # ============================================================
@@ -2271,7 +1914,6 @@ def estimate_pattern_score(
     return float(np.median(scores)) if scores else 0.0
 
 
-
 # ============================================================
 
 # Solver dispatch (original)
@@ -2307,7 +1949,6 @@ def load_solver_assets() -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
             taught_layout = None
 
     return config, taught_layout
-
 
 
 def run_one_solver_mode(
@@ -2389,9 +2030,6 @@ def run_one_solver_mode(
     return plan, info
 
 
-
-
-
 def _mean_piece_y(pieces: list[DetectedPiece]) -> float:
 
     if not pieces:
@@ -2401,13 +2039,7 @@ def _mean_piece_y(pieces: list[DetectedPiece]) -> float:
     return float(np.mean([p.center_y_image for p in pieces]))
 
 
-
-
-
 # _apply_fast_solver_budget removed — solver now runs with full config budget
-
-
-
 
 
 def _fmt(val: Any) -> str:
@@ -2425,7 +2057,6 @@ def _fmt(val: Any) -> str:
     except (ValueError, TypeError):
 
         return str(val)
-
 
 
 def _solver_attempt_record(mode, accepted, elapsed, info=None, error=None):
@@ -2447,7 +2078,6 @@ def _solver_attempt_record(mode, accepted, elapsed, info=None, error=None):
         record["error"] = error
 
     return record
-
 
 
 def solve_with_pick_recognition(
@@ -2625,7 +2255,6 @@ def solve_with_pick_recognition(
     raise RuntimeError("All recovery modes failed: " + details)
 
 
-
 # ============================================================
 
 # Warp and overlay drawing
@@ -2637,7 +2266,6 @@ def warp_to_camera(pts, mat):
     r = np.asarray(pts, dtype=np.float32).reshape(-1, 1, 2)
 
     return cv2.perspectiveTransform(r, mat).reshape(-1, 2)
-
 
 
 def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
@@ -2660,8 +2288,7 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
 
             # Convert piece center (warp px) to physical coords (mm)
 
-            px_mm = (_origin_wx_draw - p.center_x_image) / PIXELS_PER_MM  # X: leftward from BR
-            py_mm = (p.center_y_image - 300.0) / PIXELS_PER_MM  # Y: downward from origin
+            px_mm, py_mm = image_to_arm(p.center_x_image, p.center_y_image)
 
 
             # Original contour (thin grey)
@@ -2913,19 +2540,14 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
         ox, oy = int(round(origin_cam[0])), int(round(origin_cam[1]))
 
 
-
-
-
         def phys_to_cam(x_mm, y_mm):
 
-            wx = (WARP_WIDTH - 1) - x_mm * PIXELS_PER_MM  # X horizontal leftward
+            wx, wy = arm_to_warp(x_mm, y_mm)
 
-            wy = 300.0 + y_mm * PIXELS_PER_MM  # Y down from origin (75mm below TR)
 
             pcam = warp_to_camera(np.array([[[wx, wy]]], dtype=np.float32), w2c)[0]
 
             return int(round(pcam[0])), int(round(pcam[1]))
-
 
 
         X_MIN_MM = 0.0       # at BR (origin)
@@ -2935,7 +2557,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
 # X_MAX_MM already set above
 
 # Y_MAX_MM already set above (now 210 = A4 width for Y leftward)
-
 
 
         # --- Draw X axis (red, along BL-TL) ---
@@ -2961,7 +2582,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
 
 
-
         # --- Draw Y axis (green, perpendicular rightward through origin) ---
 
         y0_cam = phys_to_cam(0.0, 0.0)
@@ -2983,7 +2603,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
         cv2.putText(out, "Y", (y1_cam[0] + 8, y1_cam[1] + 4),
 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
-
 
 
         # --- X-axis tick marks and labels ---
@@ -3011,7 +2630,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1, cv2.LINE_AA)
 
 
-
         # --- Y-axis tick marks and labels ---
 
         y_step = 20.0
@@ -3035,7 +2653,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 0), 1, cv2.LINE_AA)
 
 
-
         # --- Origin marker ---
 
         cv2.circle(out, (ox, oy), 8, (0, 255, 255), -1, cv2.LINE_AA)
@@ -3047,7 +2664,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
                     (ox + 18, oy - 14),
 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
-
 
 
         # --- Corners with labels ---
@@ -3063,7 +2679,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
         cc_all = warp_to_camera(warp_corners_all, w2c)
 
         tl_c, tr_c, br_c, bl_c = cc_all
-
 
 
         corner_defs = [
@@ -3093,7 +2708,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
 
 
-
         # --- Grid lines (subtle) ---
 
         for x_mm in np.arange(X_MIN_MM, X_MAX_MM + 0.1, x_step):
@@ -3109,7 +2723,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
             cv2.line(out, g0, g1, (60, 60, 60), 1, cv2.LINE_AA)
 
 
-
         for y_mm in np.arange(y_step, Y_MAX_MM + 0.1, y_step):
 
             g0 = phys_to_cam(X_MIN_MM, y_mm)
@@ -3117,7 +2730,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
             g1 = phys_to_cam(X_MAX_MM, y_mm)
 
             cv2.line(out, g0, g1, (60, 60, 60), 1, cv2.LINE_AA)
-
 
 
         # --- Assembly target zone (75,0)-(223,0)-(223,210)-(75,210) ---
@@ -3159,7 +2771,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
                     (zcx - 60, zcy),
 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 0), 2, cv2.LINE_AA)
-
 
 
     # A4 label
@@ -3211,7 +2822,6 @@ def draw_overlay(frame, corners, pieces, reconst, w2c, area_mode=0):
     return out
 
 
-
 # ============================================================
 
 # Web UI and shared state
@@ -3261,7 +2871,6 @@ class SharedState:
     _STABILITY_THRESHOLD_MM = 1.5  # max centroid movement between frames
 
 
-
 def log_print(msg):
 
     print(msg)
@@ -3275,11 +2884,9 @@ def log_print(msg):
             SharedState.log_lines.pop(0)
 
 
-
 MODE_LABELS = {"auto": "AUTO", "fixed": "FIXED", "unknown-white": "WHITE", "unknown-pattern": "PATTERN"}
 
 MODE_CYCLE = ["auto", "fixed", "unknown-white", "unknown-pattern"]
-
 
 
 def handle_action(cmd):
@@ -3371,361 +2978,11 @@ def handle_action(cmd):
     return "OK: " + SharedState.last_action_msg
 
 
-
-HTML = """<!DOCTYPE html><html><head><title>Puzzle Recognition</title>
-
-<meta charset=utf-8>
-
-<style>
-
-*{margin:0;padding:0;box-sizing:border-box}
-
-body{background:#111;color:#fff;font:14px/1.5 monospace}
-
-.top{display:flex;height:calc(100vh - 140px)}
-
-.video{flex:1;display:flex;align-items:center;justify-content:center}
-
-.video img{max-width:100%;max-height:100%}
-
-.ctrl{position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,0.95);padding:10px;display:flex;flex-wrap:wrap;gap:6px;justify-content:center;z-index:100;border-top:2px solid #333}
-
-.ctrl button{padding:10px 14px;font-size:13px;font-weight:bold;border:2px solid #555;border-radius:6px;cursor:pointer;color:#fff;transition:all 0.15s;min-width:55px}
-
-.ctrl button:hover{opacity:0.85;transform:scale(1.03)}
-
-.ctrl button:active{transform:scale(0.96)}
-
-.ctrl .sep{width:2px;background:#444;margin:0 4px}
-
-.btn-c{background:#F44336;border-color:#E57373}
-
-.btn-p{background:#2196F3;border-color:#64B5F6}
-
-.btn-m{background:#FF5722;border-color:#FF8A65}
-
-.btn-num{background:#607D8B;border-color:#90A4AE}
-
-.btn-t{background:#009688;border-color:#4DB6AC}
-
-.btn-d{background:#795548;border-color:#A1887F}
-
-.btn-a{background:#3F51B5;border-color:#7986CB}
-
-.btn-s{background:#FF9800;border-color:#FFB74D}
-
-.btn-r-on{background:#4CAF50;border-color:#81C784}
-
-.btn-r-off{background:#F44336;border-color:#E57373}
-
-.btn-f-on{background:#E91E63;border-color:#F06292;animation:pulse 1.2s infinite}
-
-.btn-f-off{background:#607D8B;border-color:#90A4AE}
-
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
-
-.mode-bar{position:fixed;bottom:88px;left:50%;transform:translateX(-50%);color:#ff0;font:15px bold monospace;background:rgba(0,0,0,0.85);padding:6px 20px;border-radius:6px 6px 0 0;z-index:50}
-
-.info{position:fixed;top:10px;left:10px;color:#0f0;font:14px monospace;background:rgba(0,0,0,0.75);padding:8px 14px;border-radius:6px;z-index:50;pointer-events:none}
-
-</style></head><body>
-
-<div class=info id=info>Loading...</div>
-
-<div class=top><div class=video><img id=stream src=/stream></div></div>
-
-<div class=mode-bar id=mode_bar>Mode: AUTO</div>
-
-<div class=ctrl>
-
-<button class=btn-c onclick="window.open('/calibrate','_blank')">C</button>
-
-<button class=btn-p onclick=act('P')>P</button>
-
-<button class=btn-m onclick=act('M')>M</button>
-
-<span class=sep></span>
-
-<button class=btn-num onclick=act('0')>0</button>
-
-<button class=btn-num onclick=act('1')>1</button>
-
-<button class=btn-num onclick=act('2')>2</button>
-
-<button class=btn-num onclick=act('3')>3</button>
-
-<span class=sep></span>
-
-<button class=btn-t onclick=act('T')>T</button>
-
-<button class=btn-d onclick=act('D')>D</button>
-
-<button class=btn-a onclick=act('A')>A</button>
-
-<button class=btn-s onclick=act('S')>S</button>
-
-<span class=sep></span>
-
-<button class=btn-r-off id=btn_r onclick=act('R')>R:OFF</button>
-
-<span class=sep></span>
-
-<button class=btn-f-off id=btn_f onclick=act('F')>F:OFF</button>
-
-</div>
-
-<script>
-
-function act(cmd){fetch('/action?cmd='+cmd).then(r=>r.text()).then(t=>{
-
- if(cmd=='M'||cmd=='0'||cmd=='1'||cmd=='2'||cmd=='3') document.getElementById('mode_bar').innerHTML='Mode: '+t.split('->')[1]||t;
-
- if(cmd=='R'){var b=document.getElementById('btn_r');var on=t.includes('ON');b.className=on?'btn-r-on':'btn-r-off';b.textContent=on?'R:ON':'R:OFF';}
-
- if(cmd=='F'){var b=document.getElementById('btn_f');var on=t.includes('FROZEN');b.className=on?'btn-f-on':'btn-f-off';b.textContent=on?'F:FROZEN':'F:OFF';}
-
-})}
-
-setInterval(function(){fetch('/status').then(r=>r.json()).then(d=>{
-
- document.getElementById('info').innerHTML=(d.frozen?'[FROZEN] ':'')+'Pieces: '+d.pieces+' | Mode: '+d.mode+' | FPS: '+d.fps+' | '+d.last_action;
-
- document.getElementById('mode_bar').innerHTML='Mode: '+d.selected_mode + (d.recognition ? ' | REC:ON' : ' | REC:OFF');
-
- var b=document.getElementById('btn_r');if(d.recognition){b.className='btn-r-on';b.textContent='R:ON';}else{b.className='btn-r-off';b.textContent='R:OFF';}
-
- var fb=document.getElementById('btn_f');if(d.frozen){fb.className='btn-f-on';fb.textContent='F:FROZEN';}else{fb.className='btn-f-off';fb.textContent='F:OFF';}
-
-})},1000)
-
-</script></body></html>"""
-
-
-
-CALIB_HTML = """<!DOCTYPE html><html><head><title>Calibrate</title>
-
-<meta charset=utf-8>
-
-<style>body{margin:0;background:#000;text-align:center;font:14px monospace;color:#fff}
-
-img{max-width:100vw;max-height:85vh;cursor:crosshair}
-
-.info{color:#0f0;padding:10px}
-
-button{padding:10px 20px;margin:5px;font-size:16px;cursor:pointer;background:#333;color:#fff;border:2px solid #555;border-radius:4px}
-
-#coords{color:#ff0;margin:10px}
-
-</style></head><body><div class=info>Click 4 corners of A4 paper (auto-sorted)</div>
-
-<div id=coords></div>
-
-<img id=calib_img src=/raw_frame>
-
-<div><button onclick=save()>Save</button> <button onclick=reset()>Reset</button></div>
-
-<script>
-
-var pts=[];
-
-document.getElementById('calib_img').onclick=function(e){
-
- var r=this.getBoundingClientRect();
-
- var x=e.clientX-r.left, y=e.clientY-r.top;
-
- var sx=this.naturalWidth/r.width, sy=this.naturalHeight/r.height;
-
- var px=Math.round(x*sx), py=Math.round(y*sy);
-
- if(pts.length<4){pts.push([px,py]);
-
-  document.getElementById('coords').innerHTML='Pt'+pts.length+':('+px+','+py+')|'+JSON.stringify(pts);}
-
- if(pts.length==4) document.getElementById('coords').innerHTML='Ready: '+JSON.stringify(pts);
-
-};
-
-function save(){
-
- if(pts.length!=4){alert('Need 4 corners');return;}
-
- fetch('/save_calib',{method:'POST',body:JSON.stringify(pts)}).then(r=>r.text()).then(t=>alert(t));
-
-}
-
-function reset(){pts=[];document.getElementById('coords').innerHTML='';}
-
-</script></body></html>"""
-
-
-
-class Handler(http.server.BaseHTTPRequestHandler):
-
-    def do_GET(self):
-
-        if self.path == "/":
-
-            self.send_response(200)
-
-            self.send_header("Content-type", "text/html; charset=utf-8")
-
-            self.end_headers()
-
-            self.wfile.write(HTML.encode())
-
-        elif self.path.startswith("/action"):
-
-            cmd = "auto"
-
-            if "?" in self.path:
-
-                qs = self.path.split("?", 1)[1]
-
-                for kv in qs.split("&"):
-
-                    if "=" in kv and kv.split("=")[0] == "cmd":
-
-                        cmd = kv.split("=")[1]
-
-            self.send_response(200)
-
-            self.send_header("Content-type", "text/plain; charset=utf-8")
-
-            self.end_headers()
-
-            self.wfile.write(handle_action(cmd).encode())
-
-        elif self.path == "/calibrate":
-
-            self.send_response(200)
-
-            self.send_header("Content-type", "text/html; charset=utf-8")
-
-            self.end_headers()
-
-            self.wfile.write(CALIB_HTML.encode())
-
-        elif self.path == "/raw_frame":
-
-            self.send_response(200)
-
-            self.send_header("Content-type", "image/jpeg")
-
-            self.end_headers()
-
-            with SharedState.lock:
-
-                f = SharedState.raw_frame.copy() if SharedState.raw_frame is not None else None
-
-            if f is not None:
-
-                _, buf = cv2.imencode(".jpg", f, [cv2.IMWRITE_JPEG_QUALITY, 90])
-
-                self.wfile.write(buf.tobytes())
-
-        elif self.path == "/stream":
-
-            self.send_response(200)
-
-            self.send_header("Content-type", "multipart/x-mixed-replace; boundary=frame")
-
-            self.send_header("Cache-Control", "no-cache")
-
-            self.end_headers()
-
-            while True:
-
-                with SharedState.lock:
-
-                    f = SharedState.frame.copy() if SharedState.frame is not None else None
-
-                if f is not None:
-
-                    ok, buf = cv2.imencode(".jpg", f, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-
-                    if ok:
-
-                        self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
-
-                time.sleep(1.0 / STREAM_FPS)
-
-        elif self.path == "/freeze_data":
-
-            self.send_response(200)
-
-            self.send_header("Content-type", "application/json")
-
-            self.send_header("Access-Control-Allow-Origin", "*")
-
-            self.end_headers()
-
-            with SharedState.lock:
-
-                fd = SharedState.freeze_data if SharedState.freeze_data is not None else {"frozen": False, "pieces": [], "message": "No freeze data available"}
-
-            self.wfile.write(json.dumps(fd).encode())
-
-        elif self.path == "/status":
-
-            self.send_response(200)
-
-            self.send_header("Content-type", "application/json")
-
-            self.end_headers()
-
-            with SharedState.lock:
-
-                s = json.dumps(SharedState.status)
-
-            self.wfile.write(s.encode())
-
-
-
-    def do_POST(self):
-
-        if self.path == "/save_calib":
-
-            length = int(self.headers.get('Content-Length', 0))
-
-            body = self.rfile.read(length)
-
-            try:
-
-                pts_raw = json.loads(body)
-
-                if len(pts_raw) != 4:
-
-                    self.send_error(400, "Need 4 corners")
-
-                    return
-
-                pts_sorted = order_points(np.array(pts_raw, dtype=np.float32)).tolist()
-
-                with open(str(CALIBRATION_FILE), 'w') as f:
-
-                    json.dump({"corners": pts_sorted}, f, indent=2)
-
-                log_print(f"Calibration saved (sorted)")
-
-                self.send_response(200)
-
-                self.end_headers()
-
-                self.wfile.write(b"OK")
-
-            except Exception as e:
-
-                self.send_error(400, str(e))
-
-
-
 class TS(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
     allow_reuse_address = True
 
     daemon_threads = True
-
 
 
 # ============================================================
@@ -3739,7 +2996,6 @@ def main():
     log_print("=== Pi Puzzle Stream ===")
 
 
-
     # Always use LAB auto-detection (ignore saved calibration)
 
     corners = None
@@ -3747,7 +3003,6 @@ def main():
     c2w, w2c = None, None
 
     log_print("Camera mode - recognition OFF, waiting for toggle")
-
 
 
     cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
@@ -3769,7 +3024,6 @@ def main():
     time.sleep(1)
 
     log_print("Camera ready")
-
 
 
     latest_pieces = []
@@ -3797,7 +3051,6 @@ def main():
     a4_detect_interval = 1.5
 
     use_auto_detect = True
-
 
 
     def solve_worker(pieces_snap, calib_snap, mode="auto"):
@@ -3875,13 +3128,11 @@ def main():
             solving = False
 
 
-
     server = TS(("0.0.0.0", PORT), Handler)
 
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     log_print(f"Stream ready: http://192.168.31.93:{PORT}")
-
 
 
     # ---- serial listener: arm can send $DONE to unfreeze ----
@@ -3907,13 +3158,11 @@ def main():
             log_print("F: UNFREEZE (arm $DONE received)")
 
 
-
     start_listener(_unfreeze_from_arm)
 
     log_print("Serial listener started, waiting for $DONE from arm")
 
     # ----------------------------------------------------------
-
 
 
     try:
@@ -3931,7 +3180,6 @@ def main():
             frame_count += 1
 
             now = time.time()
-
 
 
             # Process web button actions
@@ -4027,7 +3275,6 @@ def main():
                 elif action in ("M", "0", "1", "2", "3"):
 
                     log_print(f"{action}: mode -> {MODE_LABELS[SharedState.current_mode]}")
-
 
 
             # Always run A4 detection (LAB threshold)
@@ -4045,7 +3292,6 @@ def main():
                 last_a4_detect = now
 
 
-
             # Detection (only when recognition is active AND not frozen)
 
             if SharedState.recognition_active and not SharedState.frozen:
@@ -4077,7 +3323,6 @@ def main():
                         last_detect = now
 
 
-
                         # Auto-freeze stability check
 
                         if pieces and latest_reconst is not None and latest_reconst.plan and len(pieces) == len(latest_reconst.plan):
@@ -4090,9 +3335,7 @@ def main():
 
                             for p in pieces:
 
-                                px_mm = (_origin_wx_freeze - p.center_x_image) / PIXELS_PER_MM  # X: leftward from BR
-
-                                py_mm = (p.center_y_image - 300.0) / PIXELS_PER_MM  # Y: downward from origin
+                                px_mm, py_mm = image_to_arm(p.center_x_image, p.center_y_image)
 
                                 centroids.append((px_mm, py_mm))
 
@@ -4142,9 +3385,7 @@ def main():
 
                                 for pp in latest_pieces:
 
-                                    px_mm = (_origin_wx_freeze - pp.center_x_image) / PIXELS_PER_MM  # X: leftward from BR
-
-                                    py_mm = (pp.center_y_image - 300.0) / PIXELS_PER_MM  # Y: downward from origin
+                                    px_mm, py_mm = image_to_arm(pp.center_x_image, pp.center_y_image)
 
                                     pid_str = f"piece_{pp.piece_id}"
 
@@ -4188,9 +3429,9 @@ def main():
 
                                                 fp["place_mm"] = [
 
-                                                    round(222.75 - float(place_mm_raw[1]), 2),
+                                                    round(solver_to_arm(float(place_mm_raw[0]), float(place_mm_raw[1]))[0], 2),
 
-                                                    round(float(place_mm_raw[0]), 2)
+                                                    round(solver_to_arm(float(place_mm_raw[0]), float(place_mm_raw[1]))[1], 2)
 
                                                 ]
 
@@ -4202,7 +3443,7 @@ def main():
 
                                     # Pickup order = sorted by distance from origin
 
-                                    pickup_order = sorted(freeze_pieces, key=lambda p: math.hypot(p["pick_mm"][0], p["pick_mm"][1]))
+                                    pickup_order = sorted(freeze_pieces, key=lambda p: arm_distance(p["pick_mm"][0], p["pick_mm"][1]))
 
                                     pickup_order_ids = [p["id"] for p in pickup_order]
 
@@ -4255,7 +3496,6 @@ def main():
                                     log_print(f"F: failed to write freeze.json: {e}")
 
 
-
                         if not solving and len(latest_pieces) >= 1 and now - last_solve > 2.0:
 
                             solving = True
@@ -4267,7 +3507,6 @@ def main():
                                              args=(list(latest_pieces), calib.copy(), "auto"),
 
                                              daemon=True).start()
-
 
 
                 # Check solve result
@@ -4289,7 +3528,6 @@ def main():
                 except queue.Empty:
 
                     pass
-
 
 
                 # Draw overlay
@@ -4339,7 +3577,6 @@ def main():
                 latest_reconst = None
 
                 display = frame
-
 
 
             # Display locally via cv2.imshow (original method)
@@ -4441,7 +3678,6 @@ def main():
                 raise KeyboardInterrupt
 
 
-
             # FPS
 
             elapsed = now - fps_start
@@ -4483,13 +3719,11 @@ def main():
                     }
 
 
-
             with SharedState.lock:
 
                 SharedState.frame = display
 
                 SharedState.raw_frame = frame
-
 
 
             time.sleep(0.01)
@@ -4505,15 +3739,6 @@ def main():
         cv2.destroyAllWindows()
 
         log_print("Stopped")
-
-
-
-if __name__ == "__main__":
-
-    main()
-
-
-
 # ============================================================
 
 # Web UI and shared state
@@ -4563,7 +3788,6 @@ class SharedState:
     _STABILITY_THRESHOLD_MM = 1.5  # max centroid movement between frames
 
 
-
 def log_print(msg):
 
     print(msg)
@@ -4577,11 +3801,9 @@ def log_print(msg):
             SharedState.log_lines.pop(0)
 
 
-
 MODE_LABELS = {"auto": "AUTO", "fixed": "FIXED", "unknown-white": "WHITE", "unknown-pattern": "PATTERN"}
 
 MODE_CYCLE = ["auto", "fixed", "unknown-white", "unknown-pattern"]
-
 
 
 def handle_action(cmd):
@@ -4673,7 +3895,6 @@ def handle_action(cmd):
     return "OK: " + SharedState.last_action_msg
 
 
-
 HTML = """<!DOCTYPE html><html><head><title>Puzzle Recognition</title>
 
 <meta charset=utf-8>
@@ -4726,7 +3947,7 @@ body{background:#111;color:#fff;font:14px/1.5 monospace}
 
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
 
-.mode-bar{position:fixed;bottom:88px;left:50%;transform:translateX(-50%);color:#ff0;font:15px bold monospace;background:rgba(0,0,0,0.85);padding:6px 20px;border-radius:6px 6px 0 0;z-index:50}
+.mode-bar{position:fixed;bottom:88px;left:50%;transform:translateX(-50%);color:#ff0;font:bold 15px monospace;background:rgba(0,0,0,0.85);padding:6px 20px;border-radius:6px 6px 0 0;z-index:50}
 
 .info{position:fixed;top:10px;left:10px;color:#0f0;font:14px monospace;background:rgba(0,0,0,0.75);padding:8px 14px;border-radius:6px;z-index:50;pointer-events:none}
 
@@ -4780,7 +4001,7 @@ body{background:#111;color:#fff;font:14px/1.5 monospace}
 
 function act(cmd){fetch('/action?cmd='+cmd).then(r=>r.text()).then(t=>{
 
- if(cmd=='M'||cmd=='0'||cmd=='1'||cmd=='2'||cmd=='3') document.getElementById('mode_bar').innerHTML='Mode: '+t.split('->')[1]||t;
+ if(cmd=='M'||cmd=='0'||cmd=='1'||cmd=='2'||cmd=='3') document.getElementById('mode_bar').innerHTML=('Mode: '+t.split('->')[1])||t;
 
  if(cmd=='R'){var b=document.getElementById('btn_r');var on=t.includes('ON');b.className=on?'btn-r-on':'btn-r-off';b.textContent=on?'R:ON':'R:OFF';}
 
@@ -4801,7 +4022,6 @@ setInterval(function(){fetch('/status').then(r=>r.json()).then(d=>{
 })},1000)
 
 </script></body></html>"""
-
 
 
 CALIB_HTML = """<!DOCTYPE html><html><head><title>Calibrate</title>
@@ -4859,7 +4079,6 @@ function save(){
 function reset(){pts=[];document.getElementById('coords').innerHTML='';}
 
 </script></body></html>"""
-
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -4983,7 +4202,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(s.encode())
 
 
-
     def do_POST(self):
 
         if self.path == "/save_calib":
@@ -5021,13 +4239,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(400, str(e))
 
 
-
 class TS(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
     allow_reuse_address = True
 
     daemon_threads = True
-
 
 
 # ============================================================
@@ -5041,7 +4257,6 @@ def main():
     log_print("=== Pi Puzzle Stream ===")
 
 
-
     # Always use LAB auto-detection (ignore saved calibration)
 
     corners = None
@@ -5049,7 +4264,6 @@ def main():
     c2w, w2c = None, None
 
     log_print("Camera mode - recognition OFF, waiting for toggle")
-
 
 
     cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
@@ -5071,7 +4285,6 @@ def main():
     time.sleep(1)
 
     log_print("Camera ready")
-
 
 
     latest_pieces = []
@@ -5099,7 +4312,6 @@ def main():
     a4_detect_interval = 1.5
 
     use_auto_detect = True
-
 
 
     def solve_worker(pieces_snap, calib_snap, mode="auto"):
@@ -5177,13 +4389,11 @@ def main():
             solving = False
 
 
-
     server = TS(("0.0.0.0", PORT), Handler)
 
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     log_print(f"Stream ready: http://192.168.31.93:{PORT}")
-
 
 
     # ---- serial listener: arm can send $DONE to unfreeze ----
@@ -5209,13 +4419,11 @@ def main():
             log_print("F: UNFREEZE (arm $DONE received)")
 
 
-
     start_listener(_unfreeze_from_arm)
 
     log_print("Serial listener started, waiting for $DONE from arm")
 
     # ----------------------------------------------------------
-
 
 
     try:
@@ -5233,7 +4441,6 @@ def main():
             frame_count += 1
 
             now = time.time()
-
 
 
             # Process web button actions
@@ -5331,7 +4538,6 @@ def main():
                     log_print(f"{action}: mode -> {MODE_LABELS[SharedState.current_mode]}")
 
 
-
             # Always run A4 detection (blob bbox)
 
             if not SharedState.frozen and now - last_a4_detect > a4_detect_interval:
@@ -5345,7 +4551,6 @@ def main():
                     c2w, w2c = build_matrices(corners)
 
                 last_a4_detect = now
-
 
 
             # Detection (only when recognition is active AND not frozen)
@@ -5379,7 +4584,6 @@ def main():
                         last_detect = now
 
 
-
                         # Auto-freeze stability check
 
                         if pieces and latest_reconst is not None and latest_reconst.plan and len(pieces) == len(latest_reconst.plan):
@@ -5392,9 +4596,8 @@ def main():
 
                             for p in pieces:
 
-                                px_mm = (_origin_wx_draw - p.center_x_image) / PIXELS_PER_MM  # X: leftward from BR
+                                px_mm, py_mm = image_to_arm(p.center_x_image, p.center_y_image)
 
-                                py_mm = (p.center_y_image - 300.0) / PIXELS_PER_MM  # Y: downward from origin
 
                                 centroids.append((px_mm, py_mm))
 
@@ -5444,9 +4647,7 @@ def main():
 
                                 for pp in latest_pieces:
 
-                                    px_mm = (_origin_wx_freeze - pp.center_x_image) / PIXELS_PER_MM  # X: leftward from BR
-
-                                    py_mm = (pp.center_y_image - 300.0) / PIXELS_PER_MM  # Y: downward from origin
+                                    px_mm, py_mm = image_to_arm(pp.center_x_image, pp.center_y_image)
 
                                     pid_str = f"piece_{pp.piece_id}"
 
@@ -5490,9 +4691,9 @@ def main():
 
                                                 fp["place_mm"] = [
 
-                                                    round(222.75 - float(place_mm_raw[1]), 2),
+                                                    round(solver_to_arm(float(place_mm_raw[0]), float(place_mm_raw[1]))[0], 2),
 
-                                                    round(float(place_mm_raw[0]), 2)
+                                                    round(solver_to_arm(float(place_mm_raw[0]), float(place_mm_raw[1]))[1], 2)
 
                                                 ]
 
@@ -5504,7 +4705,7 @@ def main():
 
                                     # Pickup order = sorted by distance from origin
 
-                                    pickup_order = sorted(freeze_pieces, key=lambda p: math.hypot(p["pick_mm"][0], p["pick_mm"][1]))
+                                    pickup_order = sorted(freeze_pieces, key=lambda p: arm_distance(p["pick_mm"][0], p["pick_mm"][1]))
 
                                     pickup_order_ids = [p["id"] for p in pickup_order]
 
@@ -5557,7 +4758,6 @@ def main():
                                     log_print(f"F: failed to write freeze.json: {e}")
 
 
-
                         if not solving and len(latest_pieces) >= 1 and now - last_solve > 2.0:
 
                             solving = True
@@ -5569,7 +4769,6 @@ def main():
                                              args=(list(latest_pieces), calib.copy(), "auto"),
 
                                              daemon=True).start()
-
 
 
                 # Check solve result
@@ -5591,7 +4790,6 @@ def main():
                 except queue.Empty:
 
                     pass
-
 
 
                 # Draw overlay
@@ -5641,7 +4839,6 @@ def main():
                 latest_reconst = None
 
                 display = frame
-
 
 
             # Display locally via cv2.imshow (original method)
@@ -5743,7 +4940,6 @@ def main():
                 raise KeyboardInterrupt
 
 
-
             # FPS
 
             elapsed = now - fps_start
@@ -5785,13 +4981,11 @@ def main():
                     }
 
 
-
             with SharedState.lock:
 
                 SharedState.frame = display
 
                 SharedState.raw_frame = frame
-
 
 
             time.sleep(0.01)
@@ -5807,7 +5001,6 @@ def main():
         cv2.destroyAllWindows()
 
         log_print("Stopped")
-
 
 
 if __name__ == "__main__":

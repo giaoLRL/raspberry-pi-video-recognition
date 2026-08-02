@@ -29,7 +29,7 @@ import time
 import urllib.request
 
 # ---- config ----
-SERIAL_PORT = "/dev/serial0"
+SERIAL_PORT = "/dev/ttyAMA0"
 SERIAL_BAUDRATE = 115200
 SERIAL_TIMEOUT = 1.0          # readline 超时 (秒)
 RECONNECT_DELAY = 2.0         # 串口重连间隔
