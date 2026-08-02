@@ -8,6 +8,7 @@ import numpy as np
 
 
 def signed_area(polygon: np.ndarray) -> float:
+    # 计算多边形有向面积
     p = np.asarray(polygon, dtype=np.float64)
     x = p[:, 0]
     y = p[:, 1]
@@ -21,10 +22,12 @@ def signed_area(polygon: np.ndarray) -> float:
 
 
 def polygon_area(polygon: np.ndarray) -> float:
+    # 计算多边形面积（绝对值）
     return abs(signed_area(polygon))
 
 
 def polygon_centroid(polygon: np.ndarray) -> np.ndarray:
+    # 计算多边形质心
     p = np.asarray(polygon, dtype=np.float64)
     x = p[:, 0]
     y = p[:, 1]
@@ -46,6 +49,7 @@ def polygon_centroid(polygon: np.ndarray) -> np.ndarray:
 
 
 def normalize_winding(polygon: np.ndarray, positive: bool = True) -> np.ndarray:
+    # 归一化多边形顶点绕序
     p = np.asarray(polygon, dtype=np.float64)
     if (signed_area(p) > 0) != positive:
         p = p[::-1].copy()
@@ -57,6 +61,7 @@ def rotation_matrix_row(theta_rad: float) -> np.ndarray:
 
     With image coordinates (x right, y down), positive theta is clockwise.
     """
+    # 构建行向量旋转矩阵（正角度为顺时针）
 
     c, s = math.cos(theta_rad), math.sin(theta_rad)
     return np.array([[c, s], [-s, c]], dtype=np.float64)
@@ -64,6 +69,7 @@ def rotation_matrix_row(theta_rad: float) -> np.ndarray:
 
 def is_proper_rotation(rotation: np.ndarray, tolerance: float = 1e-5) -> bool:
     """Return True only for a 2-D rotation, never a reflection or scaling."""
+    # 验证是否为合法刚性旋转（非镜像/缩放）
 
     r = np.asarray(rotation, dtype=np.float64)
     return bool(
@@ -76,6 +82,7 @@ def is_proper_rotation(rotation: np.ndarray, tolerance: float = 1e-5) -> bool:
 def transform_points(
     points: np.ndarray, rotation: np.ndarray, translation: np.ndarray
 ) -> np.ndarray:
+    # 对点集应用旋转+平移变换
     return np.asarray(points, dtype=np.float64) @ rotation + translation
 
 
@@ -86,6 +93,7 @@ def compose_transforms(
     second_t: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compose row transforms: apply first, then second."""
+    # 组合两个刚体变换（先first后second）
 
     return first_r @ second_r, first_t @ second_r + second_t
 
@@ -93,16 +101,19 @@ def compose_transforms(
 def invert_transform(
     rotation: np.ndarray, translation: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
+    # 求刚体变换的逆变换
     inv_r = rotation.T
     inv_t = -translation @ inv_r
     return inv_r, inv_t
 
 
 def transform_angle_deg(rotation: np.ndarray) -> float:
+    # 从旋转矩阵提取角度（度）
     return math.degrees(math.atan2(rotation[0, 1], rotation[0, 0]))
 
 
 def wrap_angle_deg(angle: float) -> float:
+    # 将角度包裹到[-180, 180]范围
     return (angle + 180.0) % 360.0 - 180.0
 
 
@@ -110,6 +121,7 @@ def rigid_align(
     source: np.ndarray, destination: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """Rigidly align equal-length ordered point lists without reflection."""
+    # 刚性对齐两组等长有序点集
 
     src = np.asarray(source, dtype=np.float64)
     dst = np.asarray(destination, dtype=np.float64)
@@ -133,6 +145,7 @@ def rigid_align(
 def best_cyclic_alignment(
     source: np.ndarray, destination: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, float, int]:
+    # 找最优循环对齐（遍历所有顶点偏移）
     src = normalize_winding(source)
     dst = normalize_winding(destination)
     if len(src) != len(dst):
@@ -148,6 +161,7 @@ def best_cyclic_alignment(
 
 
 def edge_lengths(polygon: np.ndarray) -> np.ndarray:
+    # 计算多边形各边长
     p = np.asarray(polygon, dtype=np.float64)
     return np.linalg.norm(np.roll(p, -1, axis=0) - p, axis=1)
 
@@ -155,6 +169,7 @@ def edge_lengths(polygon: np.ndarray) -> np.ndarray:
 def min_area_rectangle(
     polygons: Iterable[np.ndarray],
 ) -> tuple[np.ndarray, float, float, float]:
+    # 求点集的最小面积外接矩形
     points = np.vstack([np.asarray(p, np.float32) for p in polygons])
     rect = cv2.minAreaRect(points)
     box = cv2.boxPoints(rect).astype(np.float64)
@@ -170,6 +185,7 @@ def min_area_rectangle(
 
 def safe_interior_point(polygon: np.ndarray, resolution_mm: float = 0.5) -> np.ndarray:
     """Approximate the pole of inaccessibility using a distance transform."""
+    # 用距离变换求多边形内部安全点
 
     p = np.asarray(polygon, dtype=np.float64)
     lower = np.floor(np.min(p, axis=0) - 2.0)
@@ -192,6 +208,7 @@ def segments_properly_intersect(
     d: np.ndarray,
     epsilon: float,
 ) -> bool:
+    # 判断两线段是否真相交
     def cross(u: np.ndarray, v: np.ndarray) -> float:
         return float(u[0] * v[1] - u[1] * v[0])
 
@@ -214,6 +231,7 @@ def polygon_intersection_area(
     to translation and treats a shared seam as zero area.  Concave outlines
     use the deterministic local raster fallback.
     """
+    # 计算两个多边形的交集面积
 
     a = np.asarray(first, dtype=np.float64)
     b = np.asarray(second, dtype=np.float64)
@@ -246,6 +264,7 @@ def polygon_intersection_area(
 def polygons_overlap(
     first: np.ndarray, second: np.ndarray, tolerance_mm: float = 0.4
 ) -> bool:
+    # 判断两个多边形是否重叠
     a = np.asarray(first, dtype=np.float64)
     b = np.asarray(second, dtype=np.float64)
     if (
@@ -288,6 +307,7 @@ def edge_alignment_transforms(
     Equal edges are centre-aligned.  Unequal edges may share either endpoint;
     this supports a T-junction where one long side touches two shorter sides.
     """
+    # 计算边的对齐变换（含T型接合支持）
 
     u0, u1 = np.asarray(source_edge, dtype=np.float64)
     a, b = np.asarray(destination_edge, dtype=np.float64)

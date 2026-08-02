@@ -6,6 +6,8 @@ callers can depend on the interface rather than a specific implementation, and
 so that unit tests can substitute mock detectors and solvers.
 """
 
+# 抽象接口定义（Protocol）：供调用方依赖注入和单元测试mock使用
+
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
@@ -19,6 +21,7 @@ import numpy as np
 
 class PaperView(Protocol):
     """Structural protocol matching detector.PaperView."""
+    # PaperView结构协议（供前向引用）
     image: np.ndarray
     pixels_per_mm: float
     width_mm: float
@@ -32,6 +35,7 @@ class PaperView(Protocol):
 
 class PieceObservation(Protocol):
     """Structural protocol matching detector.PieceObservation."""
+    # PieceObservation结构协议（供前向引用）
     id: str
     polygon_mm: np.ndarray
     centroid_mm: np.ndarray
@@ -49,6 +53,7 @@ class PieceObservation(Protocol):
 @runtime_checkable
 class IPaperDetector(Protocol):
     """Detect and rectify the A4 puzzle sheet in a camera frame."""
+    # A4纸检测器接口：检测纸张位置并校正
 
     def find_a4_corners(self, frame: np.ndarray) -> np.ndarray:
         """Return the four corner points (4×2) of the A4 sheet in image pixels."""
@@ -66,6 +71,7 @@ class IPaperDetector(Protocol):
 @runtime_checkable
 class IPieceDetector(Protocol):
     """Segment puzzle pieces from a rectified paper image."""
+    # 拼图块检测器接口：从校正图像中分割出拼图块
 
     def detect_pieces(
         self,
@@ -82,6 +88,7 @@ class IPieceDetector(Protocol):
 @runtime_checkable
 class IPuzzleSolver(Protocol):
     """Assemble detected pieces into a target layout."""
+    # 拼图求解器接口：将检测到的拼图块组装成目标布局
 
     def solve(
         self,
@@ -98,6 +105,7 @@ class IPuzzleSolver(Protocol):
 @runtime_checkable
 class IPuzzlePipeline(Protocol):
     """Complete vision pipeline: detect → solve → plan."""
+    # 完整流水线接口：检测→求解→输出方案
 
     def process_frame(self, frame: np.ndarray) -> dict[str, Any]:
         """Run detection and solving on a single camera frame.

@@ -32,6 +32,7 @@ from .solver_base import (
 def solve_fixed(
     observations: list[PieceObservation], fixed_cfg: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # 固定模板求解：用形状对齐将观察到的拼图块匹配到已知目标布局
     base_templates = [
         {
             "id": item["id"],

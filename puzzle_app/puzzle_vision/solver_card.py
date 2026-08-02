@@ -44,6 +44,7 @@ def solve_card(
     rectified_image: np.ndarray | None = None,
     pixels_per_mm: float = 4.0,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # 扑克牌求解：将2-4块圆角卡片碎片拼接成完整扑克牌矩形
     """Assemble four rounded-corner playing-card fragments.
 
     Every fragment owns one of the original card corners.  Candidate motions

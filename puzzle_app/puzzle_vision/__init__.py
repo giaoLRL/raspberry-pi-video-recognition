@@ -1,4 +1,5 @@
-"""Vision-only solver for the A4 puzzle device.
+"""# 拼图视觉求解库 — A4纸拼图设备的视觉处理模块
+Vision-only solver for the A4 puzzle device.
 
 Public API
 ----------

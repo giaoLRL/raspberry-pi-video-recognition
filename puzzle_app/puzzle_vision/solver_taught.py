@@ -38,6 +38,7 @@ def solve_taught(
     layout: dict[str, Any],
     unknown_cfg: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # 示教布局求解：将观察块匹配到之前演示的布局，填充不足时回退到引导搜索
     """Match observations to a previously demonstrated rectangle.
 
     The match uses proper rigid rotations only.  A taught layout is a fast

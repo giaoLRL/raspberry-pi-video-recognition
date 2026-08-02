@@ -1,3 +1,4 @@
+# 扑克牌牌面识别：用OpenCV形状匹配识别牌面字符（不依赖Tesseract）
 from __future__ import annotations
 
 from functools import lru_cache
@@ -20,6 +21,7 @@ _FONTS = (
 
 @lru_cache(maxsize=1)
 def _rank_templates() -> tuple[tuple[str, np.ndarray], ...]:
+    # 生成牌面字符模板（A-K, BJ, RJ，多种字体+大小）
     templates: list[tuple[str, np.ndarray]] = []
     for rank in _RANKS:
         for font in _FONTS:
@@ -46,6 +48,7 @@ def _rank_templates() -> tuple[tuple[str, np.ndarray], ...]:
 
 
 def _component_holes(component: np.ndarray) -> int:
+    # 计算连通域中的孔洞数
     contours, hierarchy = cv2.findContours(
         component, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
     )
@@ -55,6 +58,7 @@ def _component_holes(component: np.ndarray) -> int:
 
 
 def _classify_rank(component: np.ndarray) -> tuple[str, float] | None:
+    # 用轮廓形状匹配分类单个字符
     contours, _ = cv2.findContours(
         component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
@@ -83,6 +87,7 @@ def _classify_rank(component: np.ndarray) -> tuple[str, float] | None:
 def _rounded_corner_frames(
     polygon: np.ndarray, config: dict[str, Any]
 ) -> list[dict[str, np.ndarray]]:
+    # 检测拼图块上的圆角特征（短弦+两条近垂直长边）
     points = np.asarray(polygon, dtype=np.float64)
     count = len(points)
     frames: list[dict[str, np.ndarray]] = []
@@ -136,6 +141,7 @@ def _rounded_corner_frames(
 def _corner_label_templates(
     pixels_per_mm_key: int,
 ) -> tuple[tuple[str, np.ndarray], ...]:
+    # 生成角标字符模板（匹配角标小字）
     ppm = pixels_per_mm_key / 100.0
     height = int(round(14.0 * ppm))
     width = int(round(17.0 * ppm))
@@ -178,6 +184,7 @@ def _recognize_corner_patch(
     frame: dict[str, np.ndarray],
     pixels_per_mm: float,
 ) -> tuple[str, float] | None:
+    # 在圆角角标区域识别牌面字符
     ppm = float(pixels_per_mm)
     height = int(round(14.0 * ppm))
     width = int(round(17.0 * ppm))
@@ -244,6 +251,7 @@ def recognize_card_marks(
     The implementation uses only OpenCV so it runs unchanged on the PC, RDK
     X5 and K230 Linux builds.  It deliberately does not require Tesseract.
     """
+    # 识别所有拼图块上的牌面标记（主入口）
 
     cfg = config or {}
     gray = cv2.cvtColor(rectified_image, cv2.COLOR_BGR2GRAY)

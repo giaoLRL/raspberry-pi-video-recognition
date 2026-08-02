@@ -6,6 +6,8 @@ strategies (divider-line, central-colour, long-line contour) and a combined
 ``find_a4_corners`` entry point that tries them in order.
 """
 
+# A4纸检测：从相机画面中定位并校正比赛用A4拼图纸
+
 from __future__ import annotations
 
 import itertools
@@ -30,6 +32,7 @@ from .geometry import (
 # ---------------------------------------------------------------------------
 
 class DetectionError(RuntimeError):
+    # A4纸检测异常（找不到纸张或分割线）
     """Raised when the A4 sheet or its divider cannot be found."""
 
 
@@ -39,6 +42,7 @@ class DetectionError(RuntimeError):
 
 @dataclass
 class PaperView:
+    # 校正后的A4纸俯视图数据类
     """A rectified top-down view of the A4 puzzle sheet."""
 
     image: np.ndarray
@@ -52,6 +56,7 @@ class PaperView:
     divider_contrast_lab: float
 
     def pixels_to_mm(self, points: np.ndarray) -> np.ndarray:
+        # 将像素坐标转换为毫米坐标
         return np.asarray(points, dtype=np.float64) / self.pixels_per_mm
 
 
@@ -60,6 +65,7 @@ class PaperView:
 # ---------------------------------------------------------------------------
 
 def order_quad(points: np.ndarray) -> np.ndarray:
+    # 将四个角点排序为[左上, 右上, 右下, 左下]
     """Order four points as [top-left, top-right, bottom-right, bottom-left]."""
     pts = np.asarray(points, dtype=np.float32)
     result = np.zeros((4, 2), dtype=np.float32)
@@ -73,6 +79,7 @@ def order_quad(points: np.ndarray) -> np.ndarray:
 
 
 def _rotate_corner_order(corners: np.ndarray, quadrants: int) -> np.ndarray:
+    # 按象限数旋转角点顺序
     """Rotate the four-corner ordering by *quadrants* × 90° CW."""
     q = quadrants % 4
     if q == 0:
@@ -88,6 +95,7 @@ def _quad_boundary_colour_contrast(
     lab_image: np.ndarray,
     quad: np.ndarray,
 ) -> float:
+    # 测量候选纸张边界的Lab颜色对比度
     """Measure the local Lab colour step across a candidate sheet boundary."""
 
     height, width = lab_image.shape[:2]
@@ -113,6 +121,7 @@ def _quick_candidate_has_divider(
     corners: np.ndarray,
     paper_cfg: dict[str, Any],
 ) -> bool:
+    # 快速验证候选纸张区域是否包含分割线
     """Return True when *corners* enclose the mandatory A4 mid-sheet divider."""
 
     width = 210
@@ -140,6 +149,7 @@ def _find_a4_from_divider_line(
     image: np.ndarray,
     paper_cfg: dict[str, Any],
 ) -> np.ndarray | None:
+    # 策略1：通过黑色分割线端点反推完整A4区域
     """Recover the complete A4 from its mandatory mid-sheet divider.
 
     With a near-normal camera, the divider endpoints give the sheet width and
@@ -266,6 +276,7 @@ def _find_a4_from_central_colour(
     image: np.ndarray,
     paper_cfg: dict[str, Any],
 ) -> np.ndarray | None:
+    # 策略2：通过采样纸张颜色找到大面积均匀区域
     """Find the large, nearly uniform sheet that occupies the image centre.
 
     In the competition setup the A4 is always present, approximately centred,
@@ -479,6 +490,7 @@ def _find_a4_from_long_lines(
     edges: np.ndarray,
     paper_cfg: dict[str, Any],
 ) -> np.ndarray | None:
+    # 策略3：用两条长边线+一条横线恢复A4四边形
     """Recover an A4 quadrilateral when clutter interrupts one outer edge.
 
     Two long side lines plus either the top or bottom line are sufficient
@@ -522,6 +534,7 @@ def _find_a4_from_long_lines(
     def deduplicate(
         values: list[tuple[Any, ...]], coordinate_index: int
     ) -> list[tuple[Any, ...]]:
+        # 合并坐标相近的直线，保留最长者
         selected: dict[int, tuple[Any, ...]] = {}
         for item in values:
             key = int(round(float(item[coordinate_index]) / 18.0))
@@ -562,6 +575,7 @@ def _find_a4_from_long_lines(
                     continue
 
                 def x_at(item: tuple[float, ...], y: float) -> float:
+                    # 计算直线在y处的x坐标
                     return item[3] + item[2] * y
 
                 quad = np.asarray(
@@ -622,6 +636,7 @@ def _find_a4_from_long_lines(
 # ---------------------------------------------------------------------------
 
 def find_a4_corners(frame: np.ndarray, paper_cfg: dict[str, Any]) -> np.ndarray:
+    # 检测A4纸四角（依次尝试三种策略）
     """Detect and return the four corners of the A4 sheet in *frame*.
 
     Several detection strategies are tried in order:
@@ -805,6 +820,7 @@ def rectify_paper(
     paper_cfg: dict[str, Any],
     cached_corners: np.ndarray | None = None,
 ) -> PaperView:
+    # 将A4纸校正为俯视图PaperView
     """Rectify the A4 sheet to a top-down ``PaperView``."""
     corners = (
         np.asarray(cached_corners, dtype=np.float32).copy()
@@ -842,6 +858,7 @@ def find_divider(
     paper_cfg: dict[str, Any],
     pixels_per_mm: float,
 ) -> tuple[float, float, float]:
+    # 定位A4纸上的水平分割线（y坐标+对比度）
     """Locate and validate the horizontal upper/lower divider on the A4 sheet.
 
     The competition sheet has one obvious solid line near half height.  Median

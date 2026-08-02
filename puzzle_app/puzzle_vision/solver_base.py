@@ -5,6 +5,8 @@ This module provides the shared foundation that all solver modules build on:
 validation, and ``UnknownPuzzleSolver`` for autonomous rigid-piece assembly.
 """
 
+# 求解器基础设施：异常类型、数据类、辅助函数、UnknownPuzzleSolver
+
 from __future__ import annotations
 
 import itertools
@@ -43,6 +45,7 @@ from .geometry import (
 
 
 class SolveError(RuntimeError):
+    # 求解器异常（无法生成有效的拼装方案）
     """Raised when the solver cannot produce a valid assembly plan."""
 
 
@@ -56,6 +59,7 @@ def _polygon_intersection_area(
     second: np.ndarray,
     pixels_per_mm: float = 2.0,
 ) -> float:
+    # 多边形交集面积（向后兼容的薄封装）
     """Backward-compatible wrapper used by solver diagnostics."""
     return polygon_intersection_area(
         first,
@@ -67,6 +71,7 @@ def _polygon_intersection_area(
 def _validate_fixed_template(
     templates: list[dict[str, Any]], fixed_cfg: dict[str, Any]
 ) -> dict[str, Any]:
+    # 验证固定模板是否完整平铺目标矩形
     target_size = np.asarray(
         fixed_cfg.get("target_size_mm", [100.0, 60.0]),
         dtype=np.float64,
@@ -139,6 +144,7 @@ def _validate_fixed_template(
 
 
 def _sample_polygon(polygon: np.ndarray, count: int = 80) -> np.ndarray:
+    # 沿多边形周长均匀采样点
     p = normalize_winding(polygon)
     lengths = edge_lengths(p)
     perimeter = float(np.sum(lengths))
@@ -157,6 +163,7 @@ def _shape_alignment(
     observed: np.ndarray,
     sample_count: int = 80,
 ) -> tuple[np.ndarray, np.ndarray, float]:
+    # 将模板形状刚性对齐到观测形状
     if len(template) == len(observed):
         r, t, error, _ = best_cyclic_alignment(template, observed)
         return r, t, error
@@ -178,6 +185,7 @@ def _card_rounded_corner_frames(
     polygon: np.ndarray,
     config: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    # 检测拼图块上的圆角卡角特征
     """Locate short chords that approximate an original rounded card corner.
 
     A rounded corner is observed as a short chord between two long, nearly
@@ -249,6 +257,7 @@ def _card_rank_anchor_options(
     height: float,
     config: dict[str, Any],
 ) -> list[tuple[np.ndarray, np.ndarray, float]]:
+    # 基于识别的牌角生成候选锚定变换
     frames = _card_rounded_corner_frames(polygon, config)
     if not frames:
         return []
@@ -331,6 +340,7 @@ def _card_rank_anchor_options(
 
 @dataclass
 class AssemblyCandidate:
+    # 拼装候选解（含变换、匹配、评分）
     transforms: dict[int, tuple[np.ndarray, np.ndarray]]
     matches: list[tuple[int, int, int, int]]
     geometry_score: float
@@ -355,6 +365,7 @@ class AssemblyCandidate:
 
 
 class UnknownPuzzleSolver:
+    # 未知拼图刚性搜索求解器（边对接+DFS）
     """Rigid edge-docking search for 1–4 pieces forming a rectangle.
 
     The solver precomputes all pairwise edge dockings, then runs a depth-first
@@ -376,6 +387,7 @@ class UnknownPuzzleSolver:
             int, tuple[np.ndarray, np.ndarray]
         ] | None = None,
     ):
+        # 初始化：预计算所有成对边对接选项
         self.observations = observations
         self.polygons = [item.polygon_mm for item in observations]
         self.centroids = [
@@ -463,6 +475,7 @@ class UnknownPuzzleSolver:
             ]
         ],
     ]:
+        # 预计算每对拼图块的所有可能边对接
         """Precompute every rigid edge docking once.
 
         The previous depth-first search rebuilt the same edge lengths,
@@ -600,6 +613,7 @@ class UnknownPuzzleSolver:
     def _state_key(
         self, transforms: dict[int, tuple[np.ndarray, np.ndarray]]
     ) -> tuple[Any, ...]:
+        # 生成搜索状态哈希键（去重）
         key: list[Any] = []
         for index in sorted(transforms):
             r, t = transforms[index]
@@ -619,6 +633,7 @@ class UnknownPuzzleSolver:
     def _placed_polygon(
         self, index: int, transforms: dict[int, tuple[np.ndarray, np.ndarray]]
     ) -> np.ndarray:
+        # 获取已放置拼图块的世界坐标多边形
         r, t = transforms[index]
         return transform_points(self.polygons[index], r, t)
 
@@ -627,6 +642,7 @@ class UnknownPuzzleSolver:
         polygon: np.ndarray,
         transforms: dict[int, tuple[np.ndarray, np.ndarray]],
     ) -> bool:
+        # 检查新多边形是否与已放置块合法共存
         # During search, independently detected corners can make two truly
         # matching seams overlap by a thin noisy sliver.  Keep those candidates
         # and let the completed-layout union score decide; the final motion
@@ -689,6 +705,7 @@ class UnknownPuzzleSolver:
         transforms: dict[int, tuple[np.ndarray, np.ndarray]],
         matches: list[tuple[int, int, int, int]],
     ) -> None:
+        # 评估完整拼装：计算矩形贴合度、重叠、间隙等评分
         polygons = [
             self._placed_polygon(index, transforms)
             for index in range(len(self.polygons))
@@ -844,6 +861,7 @@ class UnknownPuzzleSolver:
         transforms: dict[int, tuple[np.ndarray, np.ndarray]],
         matches: list[tuple[int, int, int, int]],
     ) -> None:
+        # 深度优先搜索：逐步扩展拼装状态
         if self.candidates:
             best = self.candidates[0]
             if (
@@ -1072,6 +1090,7 @@ class UnknownPuzzleSolver:
                 break
 
     def _sample_lab(self, points_mm: np.ndarray) -> np.ndarray:
+        # 从校正图像中采样Lab颜色
         assert self.lab_image is not None
         x = (points_mm[:, 0] * self.ppm).astype(np.float32).reshape(-1, 1)
         y = (points_mm[:, 1] * self.ppm).astype(np.float32).reshape(-1, 1)
@@ -1084,6 +1103,7 @@ class UnknownPuzzleSolver:
         ).reshape(-1, 3)
 
     def _best_anchor(self, allow_partial: bool) -> int:
+        # 选择分支因子最小的拼图块作为搜索锚点
         """Choose the piece that creates the fewest first-level branches.
 
         Every complete assembly can be expressed relative to any piece, so a
@@ -1107,6 +1127,7 @@ class UnknownPuzzleSolver:
         return min(counts)[1]
 
     def _texture_score(self, candidate: AssemblyCandidate) -> float:
+        # 计算拼装纹理一致性评分（接缝处颜色差异）
         if not self.use_texture or self.image is None:
             return 0.0
         differences: list[float] = []
@@ -1165,6 +1186,7 @@ class UnknownPuzzleSolver:
         return float(np.mean(values[:keep]) / 10.0)
 
     def solve(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        # 主求解入口：精确搜索→部分边搜索→回退锚点搜索
         if not 1 <= len(self.polygons) <= 4:
             raise SolveError("Unknown mode supports one to four pieces")
         search_started = time.perf_counter()

@@ -4,6 +4,8 @@ Given a ``PaperView``, this module produces a binary foreground mask and a list
 of ``PieceObservation`` values, each representing one puzzle fragment.
 """
 
+# 拼图块分割：从校正后的A4纸图像中提取各个拼图块
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,6 +31,7 @@ from .paper_detection import DetectionError, PaperView
 
 @dataclass
 class PieceObservation:
+    # 单块拼图观测数据类（含多边形坐标、面积、拾取点等）
     """One detected puzzle piece with its geometry in mm coordinates."""
 
     id: str
@@ -51,6 +54,7 @@ def _dominant_lab_background(
     valid_roi: np.ndarray,
     lab_image: np.ndarray | None = None,
 ) -> np.ndarray:
+    # 用中位数估计纸张背景的Lab颜色
     lab = (
         np.asarray(lab_image, dtype=np.float32)
         if lab_image is not None
@@ -77,6 +81,7 @@ def _source_roi_mask(
     segmentation_cfg: dict[str, Any],
     source_region: str,
 ) -> np.ndarray:
+    # 生成上半或下半A4区域的ROI掩码
     image = paper.image
     ppm = paper.pixels_per_mm
     divider_px = int(round(paper.divider_y_mm * ppm))
@@ -118,6 +123,7 @@ def foreground_mask(
     current_lab: np.ndarray | None = None,
     estimated_background_lab: np.ndarray | None = None,
 ) -> np.ndarray:
+    # 生成拼图块前景二值掩码（支持多种颜色模式）
     image = paper.image
     ppm = paper.pixels_per_mm
     roi = _source_roi_mask(
@@ -312,7 +318,9 @@ def _approximate_polygon(
     ppm: float,
     segmentation_cfg: dict[str, Any],
 ) -> np.ndarray:
+    # 用DP算法逼近轮廓为多边形（含去共线/去短边）
     def remove_nearly_collinear(points: np.ndarray) -> np.ndarray:
+        # 循环删除接近共线的顶点
         cleaned = points.copy()
         minimum_turn = np.deg2rad(
             float(segmentation_cfg.get("minimum_corner_turn_deg", 0.0))
@@ -347,6 +355,7 @@ def _approximate_polygon(
         return cleaned
 
     def remove_short_edges(points: np.ndarray) -> np.ndarray:
+        # 合并长度小于阈值的短边
         minimum = int(segmentation_cfg["expected_min_vertices"])
         minimum_edge = float(segmentation_cfg.get("minimum_detected_edge_mm", 0.0))
         cleaned = points.copy()
@@ -361,6 +370,7 @@ def _approximate_polygon(
             second = (edge_index + 1) % len(cleaned)
 
             def corner_area(index: int) -> float:
+                # 计算顶点的转折面积
                 previous = cleaned[(index - 1) % len(cleaned)]
                 current = cleaned[index]
                 following = cleaned[(index + 1) % len(cleaned)]
@@ -418,6 +428,7 @@ def detect_pieces(
     background_rectified: np.ndarray | None = None,
     source_region: str = "upper",
 ) -> tuple[list[PieceObservation], np.ndarray, str, str]:
+    # 检测拼图块：遍历颜色模式和区域，返回最优分割结果
     if source_region not in ("upper", "lower", "auto"):
         raise ValueError(f"Unsupported source region: {source_region}")
     regions = ("upper", "lower") if source_region == "auto" else (source_region,)
@@ -617,6 +628,7 @@ def detect_pieces(
             list[PieceObservation], np.ndarray, str, str, float, float
         ],
     ) -> tuple[bool, float, float]:
+        # 按期望总面积评估候选分割的面积质量
         if expected_total_area <= 0.0:
             return True, 0.0, 0.0
         total_area = sum(item.area_mm2 for item in candidate[0])
@@ -690,6 +702,7 @@ def _observations_from_mask(
     segmentation_cfg: dict[str, Any],
     mask: np.ndarray,
 ) -> list[PieceObservation]:
+    # 从二值掩码中提取PieceObservation列表
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     ppm = paper.pixels_per_mm
     minimum_area = float(segmentation_cfg["min_area_mm2"]) * ppm * ppm

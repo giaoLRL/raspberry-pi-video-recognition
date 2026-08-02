@@ -1,3 +1,4 @@
+# 配置管理：默认参数、加载/保存配置、深度合并
 from __future__ import annotations
 
 import json
@@ -8,6 +9,7 @@ from typing import Any
 
 
 def _fixed_piece_geometry() -> list[dict[str, Any]]:
+    # 返回Fig.2的四块固定拼图模板坐标(mm)
     """Return a reproducible four-piece layout matching the dimensions in Fig. 2.
 
     Coordinates are millimetres, relative to the 100 mm x 60 mm target rectangle.
@@ -196,6 +198,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 def deep_update(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    # 深度合并两个配置字典
     result = deepcopy(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(result.get(key), dict):
@@ -206,6 +209,7 @@ def deep_update(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def load_config(path: str | Path | None = None) -> dict[str, Any]:
+    # 加载配置文件（默认值+用户覆盖）
     config = deepcopy(DEFAULT_CONFIG)
     if path:
         with Path(path).open("r", encoding="utf-8") as handle:
@@ -214,5 +218,6 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
 
 
 def save_default_config(path: str | Path) -> None:
+    # 导出默认配置到JSON文件
     with Path(path).open("w", encoding="utf-8") as handle:
         json.dump(DEFAULT_CONFIG, handle, ensure_ascii=False, indent=2)

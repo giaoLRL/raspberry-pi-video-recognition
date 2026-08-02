@@ -23,6 +23,7 @@ from .solver import (
 )
 
 
+# 完整视觉流水线：纸张检测 → 拼图块分割 → 求解 → 输出方案
 class PuzzleVisionPipeline:
     """Complete vision pipeline: paper detection → piece segmentation → solve.
 
@@ -40,15 +41,18 @@ class PuzzleVisionPipeline:
     # Detection helpers
     # ------------------------------------------------------------------
 
+    # 定位A4纸四角
     def find_paper(self, frame: np.ndarray) -> np.ndarray:
         """Locate and return the four corners of the A4 sheet."""
         return find_a4_corners(frame, self.config["paper"])
 
+    # 将A4纸校正为俯视图PaperView
     def rectify(self, frame: np.ndarray, cached_corners: np.ndarray | None = None):
         """Return a ``PaperView`` (top-down rectified A4)."""
         from .paper_detection import PaperView
         return rectify_paper(frame, self.config["paper"], cached_corners)
 
+    # 从校正图中分割出拼图块
     def find_pieces(
         self,
         paper,
@@ -68,6 +72,7 @@ class PuzzleVisionPipeline:
     # Solve dispatch
     # ------------------------------------------------------------------
 
+    # 根据模式分派到对应求解器（fixed/card/taught/unknown）
     def solve(
         self,
         observations,
@@ -149,6 +154,7 @@ class PuzzleVisionPipeline:
     # Full pipeline
     # ------------------------------------------------------------------
 
+    # 单帧完整处理入口：检测→分割→求解，返回方案字典
     def process_frame(
         self,
         frame: np.ndarray,

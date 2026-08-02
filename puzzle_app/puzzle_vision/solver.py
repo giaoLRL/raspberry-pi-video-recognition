@@ -7,6 +7,8 @@ New code should import directly from the sub-modules:
 ``solver_card``, ``solver_unknown``.
 """
 
+# 外观门面 — 所有符号从 solver_base / solver_fixed / solver_taught / solver_card / solver_unknown 重新导出
+
 from .solver_base import (
     AssemblyCandidate,
     SolveError,

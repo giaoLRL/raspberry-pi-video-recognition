@@ -22,6 +22,7 @@ def solve_unknown(
     pixels_per_mm: float,
     use_texture: bool,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # 未知拼图求解：对UnknownPuzzleSolver的薄封装，自动搜索最优矩形布局
     return UnknownPuzzleSolver(
         observations,
         unknown_cfg,

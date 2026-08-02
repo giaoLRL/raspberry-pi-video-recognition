@@ -25,10 +25,11 @@ import queue
 # Add project path
 
 PROJECT_DIR = Path("/home/man/puzzle_app")
+ROBOT_DIR = Path("/home/man/puzzle_robot_project")
 
-if str(PROJECT_DIR) not in sys.path:
-
-    sys.path.insert(0, str(PROJECT_DIR))
+for d in (str(ROBOT_DIR), str(PROJECT_DIR)):
+    if d not in sys.path:
+        sys.path.insert(0, d)
 
 
 from puzzle_vision.config import load_config
@@ -57,6 +58,7 @@ from puzzle_vision.solver import SolveError, solve_card, solve_fixed, solve_taug
 
 from serial_protocol import send_and_wait_done, start_listener   # bidirectional serial
 from coords import image_to_arm, solver_to_arm, arm_to_warp, arm_distance
+from tjc_display import open_tjc, draw_state, arm_to_screen  # TJC serial screen
 
 
 # ============================================================
@@ -2282,6 +2284,49 @@ class TS(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 # ============================================================
 
+def _build_tjc_state(pieces, reconst):
+    """Convert vision data to arm-mm format for TJC display."""
+    pieces_arm = []
+    for pp in pieces:
+        pick_arm = list(image_to_arm(pp.pickup_x_image, pp.pickup_y_image))
+        # Convert polygon from warp px → arm-mm
+        poly_arm = []
+        poly = pp.polygon
+        if poly is not None and len(poly) > 0:
+            # polygon shape: (N, 1, 2) or (N, 2)
+            arr = np.asarray(poly, dtype=np.float64)
+            if arr.ndim == 3:
+                arr = arr.reshape(-1, 2)
+            for vx, vy in arr:
+                ax, ay = image_to_arm(float(vx), float(vy))
+                poly_arm.append([round(ax, 2), round(ay, 2)])
+        pieces_arm.append({
+            "id": f"piece_{pp.piece_id}",
+            "pick_mm": [round(pick_arm[0], 2), round(pick_arm[1], 2)],
+            "polygon_arm_mm": poly_arm,
+        })
+
+    plan_items = []
+    if reconst is not None and reconst.plan:
+        for item in reconst.plan:
+            plan_items.append({
+                "piece_id": str(item.get("piece_id", "")),
+                "place_mm": item.get("place_mm", [0, 0]),
+                "rotate_deg": item.get("rotate_deg", 0),
+                "target_polygon_mm": item.get("target_polygon_mm"),
+            })
+
+    info = {
+        "mode": reconst.selected_mode if reconst else "--",
+        "fill_ratio": reconst.solver_info.get("fill_ratio", 0) if reconst else 0,
+        "pieces_count": len(pieces),
+    }
+    if reconst and reconst.plan:
+        info["assembly_order"] = [str(it["piece_id"]) for it in reconst.plan]
+
+    return pieces_arm, plan_items, info
+
+
 def main():
 
     log_print("=== Pi Puzzle Stream ===")
@@ -2316,10 +2361,21 @@ def main():
 
     log_print("Camera ready")
 
+    # ── TJC serial screen ──
+    tjc = open_tjc()
+    if tjc:
+        log_print("TJC screen connected")
+    else:
+        log_print("TJC screen NOT available")
+
 
     latest_pieces = []
 
     latest_reconst = None
+
+    _tjc_counter = [0]
+
+    _tjc_last_frozen = [False]
 
     latest_calib = None
 
@@ -2690,6 +2746,20 @@ def main():
 
                                     pid_str = f"piece_{pp.piece_id}"
 
+                                    # Convert polygon vertices to arm-mm for serial screen display
+
+                                    poly_arm = []
+
+                                    for v in pp.polygon:
+
+                                        vx = float(v[0][0])
+
+                                        vy = float(v[0][1])
+
+                                        ax, ay = image_to_arm(vx, vy)
+
+                                        poly_arm.append([round(ax, 2), round(ay, 2)])
+
                                     freeze_pieces.append({
 
                                         "id": pid_str,
@@ -2703,6 +2773,8 @@ def main():
                                         "rotate_deg": 0.0,
 
                                         "place_mm": [0.0, 0.0],
+
+                                        "polygon_arm_mm": poly_arm,
 
                                     })
 
@@ -2745,6 +2817,21 @@ def main():
 
                                     pickup_order_ids = [p["id"] for p in freeze_pieces]
 
+                                # A4 paper corners in arm-mm (counter-clockwise from top-right)
+
+                                # arm-mm: X← leftward, Y↓ downward. A4 is 210×297mm.
+                                a4_corners_arm = [
+
+                                    [210.0, -75.0],   # top-left in arm-mm (max X, min Y)
+
+                                    [0.0, -75.0],     # top-right in arm-mm
+
+                                    [0.0, 222.0],     # bottom-right in arm-mm
+
+                                    [210.0, 222.0],   # bottom-left in arm-mm
+
+                                ]
+
                                 SharedState.freeze_data = {
 
                                     "frozen": True,
@@ -2761,7 +2848,9 @@ def main():
 
                                         "fill_ratio": round(latest_reconst.solver_info.get("fill_ratio", 0.0), 4) if latest_reconst else 0.0,
 
-                                    }
+                                    },
+
+                                    "a4_corners_arm_mm": a4_corners_arm,
 
                                 }
 
@@ -2870,6 +2959,19 @@ def main():
 
                 display = frame
 
+
+            # ── Update TJC serial screen (every 4th frame to avoid bottleneck) ──
+            if tjc:
+                _tjc_counter[0] += 1
+                if _tjc_counter[0] % 4 == 0 or SharedState.frozen != _tjc_last_frozen[0]:
+                    _tjc_last_frozen[0] = SharedState.frozen
+                    try:
+                        pa, pl, inf = _build_tjc_state(latest_pieces, latest_reconst)
+                        draw_state(tjc, pa, pl, inf,
+                                   frozen=SharedState.frozen,
+                                   recognition=SharedState.recognition_active)
+                    except Exception as e:
+                        log_print(f"TJC error: {e}")
 
             # Display locally via cv2.imshow (original method)
 

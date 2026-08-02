@@ -6,6 +6,8 @@ New code should import directly from the sub-modules:
 ``puzzle_vision.paper_detection`` and ``puzzle_vision.piece_detection``.
 """
 
+# 外观门面 — 所有符号从 paper_detection 和 piece_detection 子模块重新导出
+
 from .paper_detection import (
     DetectionError,
     PaperView,
