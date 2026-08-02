@@ -59,6 +59,7 @@ from puzzle_vision.solver import SolveError, solve_card, solve_fixed, solve_taug
 from serial_protocol import send_and_wait_done, start_listener   # bidirectional serial
 from coords import image_to_arm, solver_to_arm, arm_to_warp, arm_distance
 from tjc_display import open_tjc, draw_state, arm_to_screen  # TJC serial screen
+from system_check import arm_check, pi_check, StatusReporter
 
 
 # ============================================================
@@ -67,7 +68,7 @@ from tjc_display import open_tjc, draw_state, arm_to_screen  # TJC serial screen
 
 # ============================================================
 
-CAMERA_INDEX = 0
+CAMERA_INDEX = 1
 
 WARP_WIDTH = 840
 
@@ -1685,6 +1686,11 @@ class SharedState:
 
     frozen = False
 
+    # TJC HMI status text (updated by system_check, drawn by draw_state)
+    arm_status = "Arm Ready"
+    pi_status = "Pi Ready"
+    task_status = "Waiting"
+
     freeze_data = None  # dict: pieces, solve_info, etc.
 
     # Calibration data for web crosshair (arm-mm coordinate display)
@@ -1768,6 +1774,72 @@ def handle_action(cmd):
         SharedState.last_action_msg = f"Recognition {state_str}"
 
         return f"OK Recognition -> {state_str}"
+
+
+    # TJC HMI button: mode select + auto-start (M1, M2, M3)
+    elif cmd in ("M1", "M2", "M3"):
+        mode_idx = int(cmd[1])
+        if mode_idx == 1:
+            SharedState.current_mode = "fixed"
+        elif mode_idx == 2:
+            SharedState.current_mode = "unknown-white"
+        else:
+            SharedState.current_mode = "unknown-pattern"
+        SharedState.recognition_active = True
+        SharedState.last_action_msg = f"Mode: {MODE_LABELS[SharedState.current_mode]}"
+        log_print(f"TJC {cmd}: mode -> {MODE_LABELS[SharedState.current_mode]}")
+        return f"OK Mode -> {MODE_LABELS[SharedState.current_mode]}"
+
+    # TJC HMI button: arm self-check
+    elif cmd == "ARM_CHECK":
+        log_print("ARM_CHECK: starting arm self-test")
+        SharedState.last_action_msg = "Arm self-check"
+        SharedState.arm_status = "Starting..."
+
+        # Run check in thread so it doesn't block the HTTP response
+        def _do_arm_check():
+            try:
+                reporter = StatusReporter(
+                    set_arm_status=lambda s: setattr(SharedState, 'arm_status', s),
+                    set_pi_status=lambda s: setattr(SharedState, 'pi_status', s),
+                    set_task_status=lambda s: setattr(SharedState, 'task_status', s),
+                    log_fn=log_print,
+                )
+                result = arm_check(reporter)
+                log_print(f"ARM_CHECK result: {result}")
+            except Exception as e:
+                log_print(f"ARM_CHECK error: {e}")
+                SharedState.arm_status = "Error"
+        threading.Thread(target=_do_arm_check, daemon=True).start()
+        return "OK Arm check started"
+
+    # TJC HMI button: Pi self-check
+    elif cmd == "PI_CHECK":
+        log_print("PI_CHECK: starting Pi diagnostics")
+        SharedState.last_action_msg = "Pi self-check"
+        SharedState.pi_status = "Checking..."
+
+        def _do_pi_check():
+            try:
+                reporter = StatusReporter(
+                    set_arm_status=lambda s: setattr(SharedState, 'arm_status', s),
+                    set_pi_status=lambda s: setattr(SharedState, 'pi_status', s),
+                    set_task_status=lambda s: setattr(SharedState, 'task_status', s),
+                    log_fn=log_print,
+                )
+                result = pi_check(reporter)
+                log_print(f"PI_CHECK result: {result}")
+            except Exception as e:
+                log_print(f"PI_CHECK error: {e}")
+                SharedState.pi_status = "Error"
+        threading.Thread(target=_do_pi_check, daemon=True).start()
+        return "OK Pi check started"
+
+    # TJC HMI button: arm position test (move two distances)
+    elif cmd == "ARM_POS_TEST":
+        log_print("ARM_POS_TEST: starting position test")
+        SharedState.last_action_msg = "Arm pos test"
+        return "OK Arm pos test"
 
     elif cmd == "F":
 
@@ -2284,16 +2356,14 @@ class TS(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 # ============================================================
 
-def _build_tjc_state(pieces, reconst):
+def _build_tjc_state(pieces, reconst, fps=0, last_action="", selected_mode="AUTO"):
     """Convert vision data to arm-mm format for TJC display."""
     pieces_arm = []
     for pp in pieces:
         pick_arm = list(image_to_arm(pp.pickup_x_image, pp.pickup_y_image))
-        # Convert polygon from warp px → arm-mm
         poly_arm = []
         poly = pp.polygon
         if poly is not None and len(poly) > 0:
-            # polygon shape: (N, 1, 2) or (N, 2)
             arr = np.asarray(poly, dtype=np.float64)
             if arr.ndim == 3:
                 arr = arr.reshape(-1, 2)
@@ -2320,6 +2390,9 @@ def _build_tjc_state(pieces, reconst):
         "mode": reconst.selected_mode if reconst else "--",
         "fill_ratio": reconst.solver_info.get("fill_ratio", 0) if reconst else 0,
         "pieces_count": len(pieces),
+        "fps": round(fps, 1),
+        "last_action": last_action,
+        "selected_mode": selected_mode,
     }
     if reconst and reconst.plan:
         info["assembly_order"] = [str(it["piece_id"]) for it in reconst.plan]
@@ -2376,6 +2449,8 @@ def main():
     _tjc_counter = [0]
 
     _tjc_last_frozen = [False]
+
+
 
     latest_calib = None
 
@@ -2683,7 +2758,7 @@ def main():
 
                         # Auto-freeze stability check
 
-                        if pieces and latest_reconst is not None and latest_reconst.plan and len(pieces) == len(latest_reconst.plan):
+                        if pieces:
 
                             # Compute centroids in arm mm
 
@@ -2963,19 +3038,49 @@ def main():
             # ── Update TJC serial screen (every 4th frame to avoid bottleneck) ──
             if tjc:
                 _tjc_counter[0] += 1
+
+                # Compute task status from SharedState
+                if SharedState.frozen:
+                    SharedState.task_status = "Frozen"
+                elif SharedState.recognition_active:
+                    SharedState.task_status = "Recognizing"
+                else:
+                    SharedState.task_status = "Waiting"
+
                 if _tjc_counter[0] % 4 == 0 or SharedState.frozen != _tjc_last_frozen[0]:
                     _tjc_last_frozen[0] = SharedState.frozen
                     try:
-                        pa, pl, inf = _build_tjc_state(latest_pieces, latest_reconst)
+                        pa, pl, inf = _build_tjc_state(latest_pieces, latest_reconst,
+                                                       fps_val, SharedState.last_action_msg,
+                                                       SharedState.current_mode)
                         draw_state(tjc, pa, pl, inf,
                                    frozen=SharedState.frozen,
-                                   recognition=SharedState.recognition_active)
+                                   recognition=SharedState.recognition_active,
+                                   arm_status=SharedState.arm_status,
+                                   pi_status=SharedState.pi_status,
+                                   task_status=SharedState.task_status,
+                                   project_loaded=True)
                     except Exception as e:
                         log_print(f"TJC error: {e}")
 
-            # Display locally via cv2.imshow (original method)
+                    # Poll TJC button messages (only on drawing frames, inside %4 block)
+                    try:
+                        msgs = tjc.poll_messages()
+                        for msg in msgs:
+                            log_print(f"TJC btn: {msg}")
+                            handle_action(msg)
+                            if msg in ("M1", "M2", "M3"):
+                                SharedState.task_status = "Recognizing"
+                            elif msg == "ARM_CHECK":
+                                SharedState.arm_status = "Starting..."
+                            elif msg == "PI_CHECK":
+                                SharedState.pi_status = "Checking..."
+                            elif msg == "ARM_POS_TEST":
+                                SharedState.arm_status = "Moving..."
+                    except Exception:
+                        pass
 
-            cv2.imshow("Camera", display)
+
 
             key = cv2.waitKey(1) & 0xFF
 
