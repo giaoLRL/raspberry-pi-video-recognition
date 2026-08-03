@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """TJC USART HMI Display — MCU-control pattern.
 
 Architecture (standard USART HMI):
@@ -10,6 +10,7 @@ Commands end with 0xFF 0xFF 0xFF (END marker).
 
 import math
 import time
+import numpy as np
 from typing import Optional, List
 
 try:
@@ -209,6 +210,7 @@ def draw_state(tjc,
                task_status="",
                project_loaded=True,
                a4_rotation_deg=0.0,
+               a4_corners_arm=None,
                cam_frame_arm=None):
     """Draw puzzle state on TJC screen.
 
@@ -260,7 +262,7 @@ def draw_state(tjc,
         cam_pts = [arm_to_screen(ax, ay) for ax, ay in cam_frame_arm[:4]]
 
     # ============================================================
-    # Step 2: FILL — clear only the content bounding box
+    # Step 2: FILL — clear content bounding box with generous padding
     # ============================================================
     if project_loaded:
         all_pts = list(a4)
@@ -268,7 +270,7 @@ def draw_state(tjc,
             all_pts = all_pts + cam_pts
         xs = [p[0] for p in all_pts]
         ys = [p[1] for p in all_pts]
-        pad = 12
+        pad = 20
         fx0 = max(0, int(min(xs)) - pad)
         fy0 = max(UI_TOP, int(min(ys)) - pad)
         fx1 = min(SW, int(max(xs)) + pad)
@@ -375,3 +377,122 @@ def open_tjc(port="/dev/ttyAMA2", baud=9600, bkcmd=0):
         return tjc
     except Exception:
         return None
+
+
+_cached_mm_px = [None, None]  # [mm_px_X, mm_px_Y]
+
+# ?? Injected from main.py ??
+_ctx = {}
+def setup_tjc_state(*, shared_state, mode_labels, image_to_arm):
+    _ctx['SharedState'] = shared_state
+    _ctx['MODE_LABELS'] = mode_labels
+    _ctx['image_to_arm'] = image_to_arm
+
+def _build_tjc_state(pieces, reconst, fps=0, last_action="", selected_mode="AUTO",
+                     a4_corners_camera=None, cam_w=1920, cam_h=1080):
+    """Convert vision data to arm-mm format for TJC display.
+
+    a4_corners_camera: optional [4x2] A4 corners in camera image coords.
+    cam_w, cam_h: camera image dimensions.
+    """
+    # Compute A4 rotation + camera view frame
+    global _cached_mm_px
+    a4_rot = 0.0
+    cam_frame_arm = None
+    if a4_corners_camera is not None and len(a4_corners_camera) == 4:
+        tl = np.array(a4_corners_camera[0], dtype=np.float64)
+        tr = np.array(a4_corners_camera[1], dtype=np.float64)
+        bl = np.array(a4_corners_camera[3], dtype=np.float64)
+        br = np.array(a4_corners_camera[2], dtype=np.float64)
+
+        # Rotation from top edge
+        cam_deg = math.degrees(math.atan2(tr[1] - tl[1], tr[0] - tl[0]))
+        a4_rot = -cam_deg
+
+        # Camera frame: find A4 position in camera image, extend to full FOV
+        left_px   = float(min(tl[0], bl[0]))
+        right_px  = float(max(tr[0], br[0]))
+        top_px    = float(min(tl[1], tr[1]))
+        bottom_px = float(max(bl[1], br[1]))
+        a4_bbox_w = right_px - left_px
+        a4_bbox_h = bottom_px - top_px
+
+        if a4_bbox_w > 10 and a4_bbox_h > 10:
+            # One mm/px from A4 (separate axes = actual physical proportions)
+            mm_px_X = 210.0 / a4_bbox_w
+            mm_px_Y = 297.0 / a4_bbox_h
+
+            # Cache mm_px when A4 is fully visible, use cached value when
+            # A4 is near image edges (partial/false detection) to avoid
+            # distorted camera frame.
+            _edge = 20
+            a4_fully_visible = (
+                left_px > _edge and right_px < cam_w - _edge and
+                top_px > _edge and bottom_px < cam_h - _edge
+            )
+            if a4_fully_visible:
+                _cached_mm_px[0] = mm_px_X
+                _cached_mm_px[1] = mm_px_Y
+            elif _cached_mm_px[0] is not None:
+                mm_px_X = _cached_mm_px[0]
+                mm_px_Y = _cached_mm_px[1]
+
+            # A4 arm-mm bounds
+            A4_L, A4_R = 0.0, 210.0
+            A4_T, A4_B = -75.0, 222.0
+
+            # Extend A4 bounds by camera margin to get FOV
+            fov_left   = A4_L - left_px * mm_px_X
+            fov_right  = A4_R + (cam_w - right_px) * mm_px_X
+            fov_top    = A4_T - top_px * mm_px_Y
+            fov_bottom = A4_B + (cam_h - bottom_px) * mm_px_Y
+
+            # Axis-aligned rectangle
+            cam_frame_arm = [
+                [round(fov_right, 1), round(fov_top, 1)],
+                [round(fov_left, 1),  round(fov_top, 1)],
+                [round(fov_left, 1),  round(fov_bottom, 1)],
+                [round(fov_right, 1), round(fov_bottom, 1)],
+            ]
+    pieces_arm = []
+    for pp in pieces:
+        pick_arm = list(_ctx['image_to_arm'](pp.pickup_x_image, pp.pickup_y_image))
+        poly_arm = []
+        poly = pp.polygon
+        if poly is not None and len(poly) > 0:
+            arr = np.asarray(poly, dtype=np.float64)
+            if arr.ndim == 3:
+                arr = arr.reshape(-1, 2)
+            for vx, vy in arr:
+                ax, ay = _ctx['image_to_arm'](float(vx), float(vy))
+                poly_arm.append([round(ax, 2), round(ay, 2)])
+        pieces_arm.append({
+            "id": f"piece_{pp.piece_id}",
+            "pick_mm": [round(pick_arm[0], 2), round(pick_arm[1], 2)],
+            "polygon_arm_mm": poly_arm,
+        })
+
+    plan_items = []
+    if reconst is not None and reconst.plan:
+        for item in reconst.plan:
+            plan_items.append({
+                "piece_id": str(item.get("piece_id", "")),
+                "place_mm": item.get("place_mm", [0, 0]),
+                "rotate_deg": item.get("rotate_deg", 0),
+                "target_polygon_mm": item.get("target_polygon_mm"),
+            })
+
+    info = {
+        "mode": reconst.selected_mode if reconst else "--",
+        "fill_ratio": reconst.solver_info.get("fill_ratio", 0) if reconst else 0,
+        "pieces_count": len(pieces),
+        "fps": round(fps, 1),
+        "last_action": last_action,
+        "selected_mode": selected_mode,
+    }
+    if reconst and reconst.plan:
+        info["assembly_order"] = [str(it["piece_id"]) for it in reconst.plan]
+
+    return pieces_arm, plan_items, info, a4_rot, cam_frame_arm
+
+

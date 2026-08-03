@@ -5,7 +5,4 @@ Contains:
   draw_freeze.py  — render freeze.json to TJC screen
 """
 
-try:
-    from draw_screen import draw_freeze_screen, load_freeze_data
-except ImportError:
-    pass
+from tools.draw_freeze import draw_freeze

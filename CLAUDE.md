@@ -14,6 +14,24 @@ Windows PC (开发机)
       密钥: ~/.ssh/id_rsa （已加入 Pi 的 authorized_keys）
 ```
 
+## 操作原则
+
+**改文件 → R 盘直写。重启服务 → SSH。**
+
+R: 盘就是树莓派的 `/home/man/`，直接读写，速度快、不会断。
+只在杀进程/重启服务时才用 SSH。
+
+```
+# 读文件
+Read /r/main.py
+
+# 改文件
+Edit /r/main.py
+
+# 重启服务
+ssh man@man.local "pkill -f main.py; sleep 1; cd /home/man/puzzle_robot_project && setsid python3 main.py >> /tmp/puzzle_main.log 2>&1 & disown"
+```
+
 ## Shell 稳定性
 
 **绝对不要在 R: 盘卡死时反复尝试命令。**
@@ -28,21 +46,21 @@ cmd.exe /c "net use R: /delete /y && net use R: \\man.local\man /persistent:yes"
 
 ## 树莓派服务管理
 
-服务名: `pi_stream_puzzle_v2.py` (端口 8080) + `serial_monitor.py` (端口 8081)
+服务名: `main.py` (端口 8080) + `serial_monitor.py` (端口 8081)
 
 重启流程：
 ```bash
 # 1. 杀旧进程
-ssh man@man.local "pkill -f pi_stream_puzzle_v2.py; sleep 1"
+ssh man@man.local "pkill -f main.py; sleep 1"
 
 # 2. 等 SSH 恢复（kill 可能导致短暂断连）
 sleep 5
 
 # 3. 启动新进程（注意环境变量！）
-ssh man@man.local "cd /home/man && QT_QPA_PLATFORM=offscreen nohup python3 /home/man/puzzle_robot_project/vision/pi_stream_puzzle_v2.py > /tmp/puzzle_stream.log 2>&1 & disown"
+ssh man@man.local "cd /home/man && QT_QPA_PLATFORM=offscreen nohup python3 /home/man/puzzle_robot_project/main.py > /tmp/puzzle_stream.log 2>&1 & disown"
 
 # 4. 验证
-ssh man@man.local "pgrep -a pi_stream && curl -s http://127.0.0.1:8080/status"
+ssh man@man.local "pgrep -a main && curl -s http://127.0.0.1:8080/status"
 ```
 
 ## 常见错误速查
@@ -55,26 +73,6 @@ ssh man@man.local "pgrep -a pi_stream && curl -s http://127.0.0.1:8080/status"
 | Edit 匹配失败 | 文件每行代码后有空行 | Read 确认实际格式后再 Edit |
 | 找不到树莓派 | IP 变了 | `ping man.local` 获取当前 IP |
 
-## 项目结构
-
-```
-puzzle_robot_project/
-├── vision/                          # 主程序（树莓派运行）
-│   ├── pi_stream_puzzle_v2.py       ★ 主入口
-│   └── coords.py                    坐标转换
-├── puzzle_app/
-│   ├── serial_protocol.py           串口协议（$PIECE 指令格式化）
-│   ├── config.json                  拼图配置
-│   ├── freeze.json                  冻结输出（自动生成）
-│   └── puzzle_vision/               # 视觉+求解算法
-│       ├── solver.py                求解入口
-│       ├── solver_fixed.py          模式1：固定模板匹配
-│       ├── solver_unknown.py        模式2：纯几何求解
-│       ├── solver_card.py           模式3：花纹卡片
-│       └── geometry.py              几何工具
-└── robot/
-    └── serial_monitor.py            串口监控(8081)
-```
 
 ## 坐标系
 

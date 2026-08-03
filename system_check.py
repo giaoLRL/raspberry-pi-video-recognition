@@ -16,13 +16,12 @@ from pathlib import Path
 ARM_SERIAL = "/dev/ttyAMA0"
 TJC_SERIAL = "/dev/ttyAMA2"
 CAMERA_DEV = "/dev/video0"
-MONITOR_URL_SEND = "http://127.0.0.1:8081/send"
 MONITOR_URL_DATA = "http://127.0.0.1:8081/data"
-CONFIG_FILE = Path("/home/man/puzzle_app/config.json")
-CORNERS_FILE = Path("/home/man/puzzle_app/a4_corners.json")
+CONFIG_FILE = Path(__file__).resolve().parent / "puzzle_app" / "config.json"
+CORNERS_FILE = Path(__file__).resolve().parent / "puzzle_app" / "a4_corners.json"
 
 REQUIRED_PROCESSES = [
-    "pi_stream_puzzle_v2.py",
+    "main.py",
     "serial_monitor.py",
 ]
 
@@ -53,45 +52,43 @@ class StatusReporter:
 # ARM_CHECK
 # ═══════════════════════════════════════════════════════════════
 
-def arm_check(reporter: StatusReporter) -> dict:
-    """Arm self-test: send #HOME, wait for response.
+def arm_check(reporter: StatusReporter, cancel_event=None) -> dict:
+    """Arm self-test: send #HOME via serial, wait for response.
 
     Strategy:
-      1. Post #HOME to serial_monitor web endpoint
+      1. Write #HOME directly to the arm serial port
       2. Poll serial_monitor /data for new RX lines
-      3. If no response in 3s, also try direct serial write as backup
-      4. Report result
+      3. Report result
+
+    cancel_event: threading.Event, set to cancel the check mid-way.
 
     Returns dict with check results.
     """
     reporter.arm("Starting...")
-    results = {"success": False, "steps": []}
+    results = {"success": False, "steps": [], "cancelled": False}
 
-    # Step 1: Check serial_monitor is reachable
-    try:
-        urllib.request.urlopen("http://127.0.0.1:8081/", timeout=2)
-        monitor_ok = True
-        reporter.arm("Monitor OK")
-    except Exception:
-        monitor_ok = False
-        reporter.arm("Monitor down")
-        results["steps"].append({"step": "monitor_check", "ok": False,
-                                 "msg": "serial_monitor (8081) unreachable"})
+    # Check cancel
+    if cancel_event and cancel_event.is_set():
+        results["cancelled"] = True
+        reporter.arm("Cancelled")
+        return results
 
-    if not monitor_ok:
+    # Step 1: Check arm serial port exists
+    if not os.path.exists(ARM_SERIAL):
+        reporter.arm("Port missing")
+        results["steps"].append({"step": "port_check", "ok": False,
+                                 "msg": f"{ARM_SERIAL} not found"})
         results["success"] = False
         reporter.arm("Check FAILED")
         return results
 
-    # Step 2: Send home command
+    # Step 2: Send #HOME command directly via serial
     try:
-        data = "#HOME"
-        req = urllib.request.Request(
-            MONITOR_URL_SEND,
-            data=data.encode("ascii"),
-            headers={"Content-Type": "text/plain"},
-        )
-        resp = urllib.request.urlopen(req, timeout=2)
+        import serial
+        ser = serial.Serial(ARM_SERIAL, 115200, timeout=0.5, write_timeout=1.0)
+        ser.write(b"#HOME\r\n")
+        ser.flush()
+        ser.close()
         reporter.arm("Sent #HOME")
         results["steps"].append({"step": "send_home", "ok": True})
     except Exception as e:
@@ -102,20 +99,23 @@ def arm_check(reporter: StatusReporter) -> dict:
         reporter.arm("Check FAILED")
         return results
 
-    # Step 3: Wait for arm response
+    # Step 3: Poll monitor for arm response
     reporter.arm("Waiting arm...")
     arm_responded = False
     deadline = time.time() + 5.0
     while time.time() < deadline:
+        if cancel_event and cancel_event.is_set():
+            results["cancelled"] = True
+            reporter.arm("Cancelled")
+            return results
         try:
             resp = urllib.request.urlopen(MONITOR_URL_DATA, timeout=1)
             data = json.loads(resp.read().decode())
             rx_lines = data.get("rx", [])
-            # Check recent RX entries (last 3s) for arm acknowledgment
+            # Check recent RX entries for arm acknowledgment
             for entry in rx_lines[-10:]:
                 text = entry.get("text", "")
-                entry_time = entry.get("time", 0)
-                if "$DONE" in text or "#OK" in text.upper() or "HOME" in text.upper() or "OK" in text.upper():
+                if text.startswith("$DONE") or "#OK" in text.upper() or "HOME" in text.upper():
                     arm_responded = True
                     reporter.arm("Arm OK")
                     results["steps"].append({"step": "arm_response",
@@ -129,7 +129,6 @@ def arm_check(reporter: StatusReporter) -> dict:
 
     if not arm_responded:
         # Arm might still be starting — #HOME sent, just no explicit confirm
-        # This is common; many arms home silently
         reporter.arm("Arm Ready")
         results["steps"].append({"step": "arm_response",
                                  "ok": True,
@@ -234,7 +233,7 @@ def _check_tjc_screen() -> tuple:
         return False, str(e)
 
 
-def pi_check(reporter: StatusReporter) -> dict:
+def pi_check(reporter: StatusReporter, cancel_event=None) -> dict:
     """Comprehensive Pi + hardware self-check.
 
     Checks:
@@ -248,7 +247,12 @@ def pi_check(reporter: StatusReporter) -> dict:
     """
     reporter.pi("Checking...")
     all_ok = True
-    report = {}
+    report = {"cancelled": False}
+
+    if cancel_event and cancel_event.is_set():
+        report["cancelled"] = True
+        reporter.pi("Cancelled")
+        return report
 
     checks = [
         ("camera", "Camera", lambda: _check_device(CAMERA_DEV)),

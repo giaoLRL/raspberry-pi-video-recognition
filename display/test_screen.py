@@ -9,9 +9,6 @@
 
 import sys
 import time
-import struct
-import threading
-from typing import Any
 
 # ---- 配置 ----
 SERIAL_PORT = "/dev/ttyAMA2"
@@ -30,7 +27,7 @@ def find_serial():
         sys.exit(1)
 
 
-def open_port(serial, port: str, baud: int) -> Any:
+def open_port(serial, port, baud):
     """打开串口。"""
     try:
         ser = serial.Serial(port, baud, timeout=0.5, write_timeout=1.0)
@@ -41,7 +38,7 @@ def open_port(serial, port: str, baud: int) -> Any:
         return None
 
 
-def send_command(ser, cmd: str, end: bytes = FRAME_END, encoding: str = "gbk") -> bytes:
+def send_command(ser, cmd, end=FRAME_END, encoding="gbk"):
     """发送指令并读取应答。
 
     TJC 屏文本部分使用 GBK 编码。ASCII 是 GBK 的子集，
@@ -60,7 +57,6 @@ def send_command(ser, cmd: str, end: bytes = FRAME_END, encoding: str = "gbk") -
         time.sleep(0.05)
     if reply:
         # TJC 回传格式: 0x01/0x02/0x03 + payload + 0xff 0xff 0xff
-        # 尝试提取有效文本
         try:
             clean = reply.rstrip(b"\xff")
             if clean.startswith(b"\x01"):
@@ -79,27 +75,47 @@ def send_command(ser, cmd: str, end: bytes = FRAME_END, encoding: str = "gbk") -
     return reply
 
 
-def test_connection(ser) -> bool:
-    """发送版本查询，检验是否为 TJC 串口屏。"""
+def _reply_is_valid(reply):
+    """Check if reply bytes look like a valid TJC response.
+
+    A valid TJC response frame starts with 0x01 (success), 0x02 (fail),
+    or 0x03 (data), followed by payload and 0xFF 0xFF 0xFF.
+    """
+    if not reply:
+        return False
+    # Must start with a known TJC response byte
+    return reply[0:1] in (b"\x01", b"\x02", b"\x03")
+
+
+def test_connection(ser):
+    """发送版本查询，检验是否为 TJC 串口屏。
+
+    Returns True only if a well-formed TJC response is detected
+    (not just any noise on the line).
+    """
     print("\n--- 连接检测 ---")
 
-    # 先开回传模式（回传所有指令状态），然后查版本
-    send_command(ser, "bkcmd=2")   # 0=不回传 1=失败才回 2=全回 3=原始
+    # Enable command acknowledgements
+    send_command(ser, "bkcmd=2")
     time.sleep(0.1)
-    send_command(ser, "bkcmd=3")   # 尝试原始模式
-    time.sleep(0.1)
+
+    # Query firmware version
     reply = send_command(ser, "get version")
-    if reply:
+    if _reply_is_valid(reply):
+        # Restore quiet mode after verification
+        send_command(ser, "bkcmd=0")
         return True
 
-    # 部分固件用不同命令
-    reply = send_command(ser, "prints \"HELLO_TJC\",0")
-    if reply:
-        return True
-
-    # 再试: 获取设备型号
+    # Try alternate: device model query
     reply = send_command(ser, "get model")
-    if reply:
+    if _reply_is_valid(reply):
+        send_command(ser, "bkcmd=0")
+        return True
+
+    # Last resort: prints should trigger an ACK
+    reply = send_command(ser, 'prints "HELLO_TJC",0')
+    if _reply_is_valid(reply):
+        send_command(ser, "bkcmd=0")
         return True
 
     return False
@@ -162,7 +178,7 @@ def draw_test_pattern(ser):
     print("\n✓ 测试图案绘制完成")
 
 
-def detect_baud(serial) -> tuple:
+def detect_baud(serial):
     """自动探测正确的波特率。"""
     print("\n===== 波特率自动探测 =====")
     for baud in BAUD_RATES:
@@ -238,7 +254,11 @@ if __name__ == "__main__":
 
     # 先尝试用户指定的波特率
     if len(sys.argv) > 1:
-        baud = int(sys.argv[1])
+        try:
+            baud = int(sys.argv[1])
+        except ValueError:
+            print(f"Invalid baud rate: {sys.argv[1]}")
+            sys.exit(1)
         print(f"\n使用指定波特率: {baud}")
         ser = open_port(serial, SERIAL_PORT, baud)
         if ser is None:
