@@ -2416,12 +2416,13 @@ def _build_tjc_state(pieces, reconst, fps=0, last_action="", selected_mode="AUTO
             fov_bottom = A4_B + (cam_h - bottom_px) * mm_px_Y
 
             # arm_to_screen swaps axes (Y→screen X, X→screen Y).
-            # Keep [X,Y] format — arm_to_screen handles the swap.
+            # Pass [Y, X] so that the camera's wider X span (dominated by
+            # cam_w, 16:9) maps to screen X, preserving the 16:9 aspect.
             cam_frame_arm = [
-                [round(fov_right, 1), round(fov_top, 1)],
-                [round(fov_left, 1),  round(fov_top, 1)],
-                [round(fov_left, 1),  round(fov_bottom, 1)],
-                [round(fov_right, 1), round(fov_bottom, 1)],
+                [round(fov_top, 1),    round(fov_right, 1)],
+                [round(fov_top, 1),    round(fov_left, 1)],
+                [round(fov_bottom, 1), round(fov_left, 1)],
+                [round(fov_bottom, 1), round(fov_right, 1)],
             ]
     pieces_arm = []
     for pp in pieces:
@@ -2867,7 +2868,9 @@ def main():
 
                             # Trigger freeze
 
-                            if SharedState._stability_counter >= SharedState._STABILITY_FRAMES:
+                            if (SharedState._stability_counter >= SharedState._STABILITY_FRAMES
+                                and latest_reconst is not None
+                                and latest_reconst.plan):
 
                                 SharedState.frozen = True
 
